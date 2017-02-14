@@ -457,7 +457,7 @@ go_library(
 ## go\_binary
 
 ```bzl
-go_binary(name, srcs, deps, data)
+go_binary(name, srcs, deps, data, stamp)
 ```
 <table class="table table-condensed table-bordered table-params">
   <colgroup>
@@ -497,6 +497,20 @@ go_binary(name, srcs, deps, data)
       <td>
         <code>List of labels, optional</code>
         <p>List of files needed by this rule at runtime.</p>
+      </td>
+    </tr>
+    <tr>
+      <td><code>stamp</code></td>
+      <td>
+        <code>Boolean; optional; default is False</code>
+        <p>Whether build information should be included in the generated binary.
+        Add <code>@io_bazel_rules_go//buildstamp:go_default_library</code> to
+        <code>deps</code> to access the build information . Build with 
+        <code>--workspace_status_command=./status.sh</code> to add custom
+        information (using your own script).
+        <a href="https://github.com/bazelbuild/bazel/blob/master/tools/buildstamp/get_workspace_status">
+        tools/buildstamp/get_workspace_status</a> in Bazel is a good template
+        for this that provides the Git revision and status.
       </td>
     </tr>
   </tbody>

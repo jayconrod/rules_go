@@ -352,7 +352,7 @@ def _short_path(f):
   return f.path[len(prefix):]
 
 def emit_go_link_action(ctx, importmap, transitive_libs, cgo_deps, lib,
-                        executable, x_defs={}):
+                        executable, x_defs={}, stamp=False):
   """Sets up a symlink tree to libraries to link together."""
   out_dir = executable.path + ".dir"
   out_depth = out_dir.count('/') + 1
@@ -396,6 +396,15 @@ def emit_go_link_action(ctx, importmap, transitive_libs, cgo_deps, lib,
   if x_defs:
     link_cmd += [" -X %s='%s' " % (k, v) for k,v in x_defs.items()]
 
+  if stamp:
+    stamp_cmd = ("LINKSTAMP=$(cat '%s' '%s')" %
+        (ctx.version_file.path, ctx.info_file.path))    
+    link_cmd += ['-X github.com/bazelbuild/rules_go/buildstamp.rawStampData="$LINKSTAMP"']
+    stamp_deps = [ctx.version_file, ctx.info_file]
+  else:
+    stamp_cmd = ""
+    stamp_deps = []
+
   # workaround for a bug in ld(1) on Mac OS X.
   # http://lists.apple.com/archives/Darwin-dev/2006/Sep/msg00084.html
   # TODO(yugui) Remove this workaround once rules_go stops supporting XCode 7.2
@@ -416,6 +425,7 @@ def emit_go_link_action(ctx, importmap, transitive_libs, cgo_deps, lib,
   cmds += ["export PATH=$PATH:/usr/bin"]
   cmds += [
     "export GOROOT=$(pwd)/" + ctx.file.go_tool.dirname + "/..",
+    stamp_cmd,
     "cd " + out_dir,
     ' '.join(link_cmd),
     "mv -f " + _go_importpath(ctx) + " " + ("../" * out_depth) + executable.path,
@@ -424,7 +434,7 @@ def emit_go_link_action(ctx, importmap, transitive_libs, cgo_deps, lib,
   f = _emit_generate_params_action(cmds, ctx, lib.path + ".GoLinkFile.params")
 
   ctx.action(
-      inputs = (list(transitive_libs) + [lib] + list(cgo_deps) +
+      inputs = (list(transitive_libs) + [lib] + list(cgo_deps) + stamp_deps +
                 ctx.files.toolchain + ctx.files._crosstool),
       outputs = [executable],
       executable = f,
@@ -438,12 +448,13 @@ def go_binary_impl(ctx):
   lib_out = ctx.outputs.lib
 
   emit_go_link_action(
-    ctx,
-    transitive_libs=lib_result.transitive_go_library_object,
-    importmap=lib_result.transitive_go_importmap,
-    cgo_deps=lib_result.transitive_cgo_deps,
-    lib=lib_out, executable=executable,
-    x_defs=ctx.attr.x_defs)
+      ctx,
+      transitive_libs=lib_result.transitive_go_library_object,
+      importmap=lib_result.transitive_go_importmap,
+      cgo_deps=lib_result.transitive_cgo_deps,
+      lib=lib_out, executable=executable,
+      x_defs=ctx.attr.x_defs,
+      stamp=ctx.attr.stamp)
 
   runfiles = ctx.runfiles(collect_data = True,
                           files = ctx.files.data)
