@@ -167,6 +167,13 @@ def _go_repository_select_impl(ctx):
     rules_go_repo = ctx.attr.rules_go_repo_only_for_internal_use,
   ))
 
+  # 3. Create a file that export GOARCH and GOOS for cross-compilation.
+  env_file_content = ""
+  if "GOARCH" in ctx.os.environ:
+    env_file_content += "export GOARCH='%s'\n" % ctx.os.environ["GOARCH"]
+  if "GOOS" in ctx.os.environ:
+    env_file_content += "export GOOS='%s'\n" % ctx.os.environ["GOOS"]
+  ctx.file("buildenv.bash", env_file_content)
 
 _go_repository_select = repository_rule(
     _go_repository_select_impl,
@@ -186,6 +193,11 @@ _go_repository_select = repository_rule(
             single_file = True,
         ),
     },
+    # TODO: uncomment when the latest Bazel release supports this (after 0.4.4).
+    # environ = [
+    #     "GOARCH",
+    #     "GOOS",
+    # ],
 )
 
 
