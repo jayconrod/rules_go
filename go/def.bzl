@@ -136,6 +136,7 @@ def _emit_generate_params_action(cmds, ctx, fn):
       # different shell, e.g., /bin/dash on Ubuntu.
       "#!/bin/bash",
       "set -e",
+      ". '%s'" % ctx.file._buildenv.path,
   ]
   cmds_all += cmds
   cmds_all_str = "\n".join(cmds_all) + "\n"
@@ -169,7 +170,7 @@ def emit_go_asm_action(ctx, source, out_obj):
   f = _emit_generate_params_action(cmds, ctx, out_obj.path + ".GoAsmCompileFile.params")
 
   ctx.action(
-      inputs = [source] + ctx.files.toolchain,
+      inputs = [source] + ctx.files.toolchain + ctx.files._buildenv,
       outputs = [out_obj],
       mnemonic = "GoAsmCompile",
       executable = f,
@@ -249,7 +250,7 @@ def emit_go_compile_action(ctx, sources, deps, out_lib, extra_objects=[]):
   # (ctx.label.package + "/" ctx.label.name) for now.
   cmds += [ "export GOROOT=$(pwd)/" + ctx.file.go_tool.dirname + "/..",
     ' '.join(args + [prefix + _remove_external_prefix(i.path) for i in sources])]
-  extra_inputs = ctx.files.toolchain
+  extra_inputs = ctx.files.toolchain + ctx.files._buildenv
 
   if extra_objects:
     extra_inputs += extra_objects
@@ -464,7 +465,8 @@ def emit_go_link_action(ctx, importmap, transitive_libs, cgo_deps, lib,
 
   ctx.action(
       inputs = (list(transitive_libs) + [lib] + list(cgo_deps) +
-                ctx.files.toolchain + ctx.files._crosstool) + stamp_inputs,
+                ctx.files.toolchain + ctx.files._crosstool + stamp_inputs +
+                ctx.files._buildenv),
       outputs = [executable],
       executable = f,
       mnemonic = "GoLink",
@@ -574,6 +576,11 @@ go_env_attrs = {
         ),
         allow_files = False,
         cfg = "host",
+    ),
+    "_buildenv": attr.label(
+        default = Label("@io_bazel_rules_go_toolchain//:buildenv.bash"),
+        single_file = True,
+        allow_files = True,
     ),
 }
 
