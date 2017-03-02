@@ -141,12 +141,14 @@ go_root(
   name = "go_root",
   path = "{goroot}",
 )
+
+exports_files(["buildenv.bash"])
 """
 
 def _go_repository_select_impl(ctx):
   os_name = ctx.os.name
 
-  # 1. Configure the goroot path
+  # Configure the goroot path
   if os_name == 'linux':
     goroot = ctx.path(ctx.attr._linux).dirname
   elif os_name == 'mac os x':
@@ -154,7 +156,7 @@ def _go_repository_select_impl(ctx):
   else:
     fail("Unsupported operating system: " + os_name)
 
-  # 2. Create the symlinks and write the BUILD file.
+  # Create the symlinks and write the BUILD file.
   gobin = goroot.get_child("bin")
   gopkg = goroot.get_child("pkg")
   gosrc = goroot.get_child("src")
@@ -167,13 +169,20 @@ def _go_repository_select_impl(ctx):
     rules_go_repo = ctx.attr.rules_go_repo_only_for_internal_use,
   ))
 
-  # 3. Create a file that export GOARCH and GOOS for cross-compilation.
+  # Create a file that export GOARCH and GOOS for cross-compilation.
   env_file_content = ""
+  env_args = []
   if "GOARCH" in ctx.os.environ:
     env_file_content += "export GOARCH='%s'\n" % ctx.os.environ["GOARCH"]
+    env_args.append("GOARCH=%s" % ctx.os.environ["GOARCH"])
   if "GOOS" in ctx.os.environ:
     env_file_content += "export GOOS='%s'\n" % ctx.os.environ["GOOS"]
+    env_args.append("GOOS=%s" % ctx.os.environ["GOOS"])
   ctx.file("buildenv.bash", env_file_content)
+
+  # Build the standard library for our target platform if we're cross compiling.
+  env_args.append("CGO_ENABLED=0")
+  res = ctx.execute(["env"] + env_args + ["bin/go", "install", "-v", "std"])
 
 _go_repository_select = repository_rule(
     _go_repository_select_impl,
