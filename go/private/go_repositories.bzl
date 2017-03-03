@@ -202,11 +202,11 @@ _go_repository_select = repository_rule(
             single_file = True,
         ),
     },
-    # TODO: uncomment when the latest Bazel release supports this (after 0.4.4).
-    # environ = [
-    #     "GOARCH",
-    #     "GOOS",
-    # ],
+    # Note: environ requires Bazel 0.4.5, which is not quite released yet.
+    environ = [
+        "GOARCH",
+        "GOOS",
+    ],
 )
 
 
