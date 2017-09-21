@@ -19,19 +19,55 @@ load("@io_bazel_rules_go//go/private:common.bzl",
     "compile_modes",
 )
 load("@io_bazel_rules_go//go/private:providers.bzl", 
+    "CgoInfo",
     "GoLibrary", 
-    "CgoLibrary",
     "GoEmbed",
     "library_attr",
     "searchpath_attr",
 )
 
-def emit_library(ctx, go_toolchain, srcs, deps, cgo_object, embed, want_coverage, importpath, importable=True, golibs=[]):
+def emit_library(
+    ctx,
+    go_toolchain,
+    importpath,
+    srcs = (),
+    deps = (),
+    cgo_info = None,
+    embed = (),
+    want_coverage = False,
+    importable = True,
+    golibs=()):
+  """emit_library emits actions to compile Go code into an .a file. It
+  supports embedding, cgo dependencies, coverage, and assembling and packing
+  .s files.
+
+  Args:
+    ctx: the Skylark Context.
+    go_toolchain: the Go toolchain.
+    srcs: an iterable of .go source Files to be compiled.
+    deps: an iterable of Targets with the GoLibrary provider. These are
+        direct dependencies.
+    embed: an iterable of Targets with the GoEmbed provider. Sources,
+        dependencies, and other information from these dependencies are combined
+        with the library being compiled. Used to build internal test packages.
+    cgo_info: an optional CgoInfo provider for this library. There may be at
+        most one of these among the library and its embeds.
+    want_coverage: a bool indicating whether sources should be instrumented
+        for coverage.
+    importpath: a string indicating the import path of the package.
+    importable: a bool indicating whether the package can be imported by
+        other libraries.
+    golibs: an iterable of GoLibrary objects. Used to pass in
+        synthetic dependencies.
+       
+  Returns:
+    A tuple of GoLibrary and GoEmbed.
+  """
   dep_runfiles = [d.data_runfiles for d in deps]
   direct = depset(golibs)
   gc_goopts = tuple(ctx.attr.gc_goopts)
-  cgo_deps = depset()
   cover_vars = ()
+  cgo_info_label = ctx.label if cgo_info else None
   for t in embed:
     goembed = t[GoEmbed]
     srcs = getattr(goembed, "srcs", depset()) + srcs
@@ -39,29 +75,29 @@ def emit_library(ctx, go_toolchain, srcs, deps, cgo_object, embed, want_coverage
     direct += getattr(goembed, "deps", ())
     dep_runfiles += [t.data_runfiles]
     gc_goopts += getattr(goembed, "gc_goopts", ())
-    cgo_deps += getattr(goembed, "cgo_deps", ())
-    if CgoLibrary in t:
-      cgolib = t[CgoLibrary]
-      if cgolib.object:
-        if cgo_object:
-          fail("go_library %s cannot have cgo_object because the package " +
-               "already has cgo_object in %s" % (ctx.label.name, cgolib.object))
-        cgo_object = cgolib.object
+    embed_cgo_info = getattr(goembed, "cgo_info", None)
+    if embed_cgo_info:
+      if cgo_info:
+        fail("at most one embedded library may have cgo, but " +
+             "both %s and %s have cgo" % (cgo_info_label, t.label))
+      cgo_info = embed_cgo_info
+      cgo_info_label = t.label
+
   source = split_srcs(srcs)
   if source.c:
     fail("c sources in non cgo rule")
   if not source.go:
     fail("no go sources")
 
-  if cgo_object:
-    dep_runfiles += [cgo_object.data_runfiles]
-    cgo_deps += cgo_object.cgo_deps
+  if cgo_info:
+    dep_runfiles += [cgo_info.runfiles]
 
-  extra_objects = [cgo_object.cgo_obj] if cgo_object else []
+  extra_objects = []
   for src in source.asm:
     obj = ctx.new_file(src, "%s.dir/%s.o" % (ctx.label.name, src.basename[:-2]))
     go_toolchain.actions.asm(ctx, go_toolchain, src, source.headers, obj)
     extra_objects += [obj]
+  archive = cgo_info.archive if cgo_info else None
 
   for dep in deps:
     direct += [dep[GoLibrary]]
@@ -85,7 +121,7 @@ def emit_library(ctx, go_toolchain, srcs, deps, cgo_object, embed, want_coverage
     searchpath = out_lib.path[:-len(lib_name)]
     mode_fields[library_attr(mode)] = out_lib
     mode_fields[searchpath_attr(mode)] = searchpath
-    if len(extra_objects) == 0:
+    if len(extra_objects) == 0 and archive == None:
       go_toolchain.actions.compile(ctx,
           go_toolchain = go_toolchain,
           sources = go_srcs,
@@ -111,11 +147,14 @@ def emit_library(ctx, go_toolchain, srcs, deps, cgo_object, embed, want_coverage
           in_lib = partial_lib,
           out_lib = out_lib,
           objects = extra_objects,
+          archive = archive,
       )
 
   dylibs = []
-  if cgo_object:
-    dylibs += [d for d in cgo_object.cgo_deps if d.path.endswith(".so")]
+  cgo_deps = depset()
+  if cgo_info:
+    dylibs += [d for d in cgo_info.deps if d.path.endswith(".so")]
+    cgo_deps = cgo_info.deps
 
   runfiles = ctx.runfiles(files = dylibs, collect_data = True)
   for d in dep_runfiles:
@@ -132,7 +171,7 @@ def emit_library(ctx, go_toolchain, srcs, deps, cgo_object, embed, want_coverage
           transitive = transitive, # The transitive set of go libraries depended on
           srcs = depset(srcs), # The original sources
           cover_vars = cover_vars, # The cover variables for this library
-          cgo_deps = cgo_deps, # The direct cgo dependencies of this library
+          cgo_deps = cgo_deps, # The direct dependencies of the cgo code
           runfiles = runfiles, # The runfiles needed for things including this library
           **mode_fields
       ),
@@ -140,10 +179,7 @@ def emit_library(ctx, go_toolchain, srcs, deps, cgo_object, embed, want_coverage
           srcs = join_srcs(struct(**transformed)), # The transformed sources actually compiled
           deps = direct, # The direct depencancies of the library
           cover_vars = cover_vars, # The cover variables for these sources
-          cgo_deps = cgo_deps, # The direct cgo dependencies of this library
+          cgo_info = cgo_info, # The cgo information for this library or one of its embeds.
           gc_goopts = gc_goopts, # The options this library was compiled with
-      ),
-      CgoLibrary(
-          object = cgo_object,
       ),
   ]

@@ -17,27 +17,45 @@
 package main
 
 import (
-	"fmt"
+	"flag"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func run(args []string) error {
-	if len(args) < 4 {
-		return fmt.Errorf("Usage: pack gotool in.a out.a obj.o...")
-	}
-	gotool := args[0]
-	inArchive := args[1]
-	outArchive := args[2]
-	objects := args[3:]
-
-	if err := copyFile(inArchive, outArchive); err != nil {
+	flags := flag.NewFlagSet("pack", flag.ContinueOnError)
+	gotool := flags.String("gotool", "", "Path to the go tool")
+	ar := flags.String("ar", "", "Path to the archive tool")
+	inArchive := flags.String("in", "", "Path to input archive")
+	outArchive := flags.String("out", "", "Path to output archive")
+	objects := multiFlag{}
+	flags.Var(&objects, "obj", "Object to append (may be repeated)")
+	archive := flags.String("arc", "", "Archive to append (at most one)")
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	packArgs := append([]string{"tool", "pack", "r", outArchive}, objects...)
-	cmd := exec.Command(gotool, packArgs...)
+
+	if err := copyFile(*inArchive, *outArchive); err != nil {
+		return err
+	}
+
+	if *archive != "" {
+		archiveObjects, err := listFiles(*ar, *archive)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(*ar, "x", *archive)
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+		objects = append(objects, archiveObjects...)
+	}
+
+	packArgs := append([]string{"tool", "pack", "r", *outArchive}, objects...)
+	cmd := exec.Command(*gotool, packArgs...)
 	return cmd.Run()
 }
 
@@ -60,4 +78,21 @@ func copyFile(inPath, outPath string) error {
 	defer outFile.Close()
 	_, err = io.Copy(outFile, inFile)
 	return err
+}
+
+func listFiles(ar, archive string) ([]string, error) {
+	cmd := exec.Command(ar, "t", archive)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(out), "\n")
+	var files []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
 }
