@@ -14,10 +14,17 @@
 
 // pack copies an .a file and appends a list of .o files to the copy using
 // go tool pack. It is invoked by the Go rules as an action.
+//
+// pack can also append .o files contained in a static library passed in
+// with the -arc option. That archive may be in BSD or SysV / GNU format.
+// pack has a primitive parser for these formats, since cmd/pack can't
+// handle them, and ar may not be available.
 package main
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,11 +52,10 @@ func run(args []string) error {
 	}
 
 	if *archive != "" {
-		archiveFiles, err := extractFiles(*archive, "bsd")
+		archiveObjects, err := extractFiles(*archive)
 		if err != nil {
 			return err
 		}
-		archiveObjects := filterFileNames(archiveFiles)
 		objects = append(objects, archiveObjects...)
 	}
 
@@ -78,11 +84,16 @@ func copyFile(inPath, outPath string) error {
 }
 
 const (
+	// arHeader appears at the beginning of archives created by "ar" and
+	// "go tool pack" on all platforms.
 	arHeader = "!<arch>\n"
-	entryLen = 60
+
+	// entryLength is the size in bytes of the metadata preceding each file
+	// in an archive.
+	entryLength = 60
 )
 
-func extractFiles(archive, format string) (files []string, err error) {
+func extractFiles(archive string) (files []string, err error) {
 	f, err := os.Open(archive)
 	if err != nil {
 		return nil, err
@@ -95,24 +106,21 @@ func extractFiles(archive, format string) (files []string, err error) {
 		return nil, fmt.Errorf("%s: bad header", archive)
 	}
 
+	var nameData []byte
 	for {
-		var name string
-		var size int64
-		switch format {
-		case "bsd":
-			name, size, err = readBSDEntry(r)
-		case "gnu":
-			name, size, err = readGNUEntry(r)
-		default:
-			return nil, fmt.Errorf("%s: unknown format: %s", archive, format)
-		}
+		name, size, err := readMetadata(r, &nameData)
 		if err == io.EOF {
 			return files, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-
+		if !isObjectFile(name) {
+			if err := skipFile(r, size); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if err := extractFile(r, name, size); err != nil {
 			return nil, err
 		}
@@ -120,8 +128,18 @@ func extractFiles(archive, format string) (files []string, err error) {
 	}
 }
 
-func readBSDEntry(r io.Reader) (name string, size int64, err error) {
-	var entry [entryLen]byte
+// readMetadata reads the relevant fields of an entry. Before calling,
+// r must be positioned at the beginning of an entry. Afterward, r will
+// be positioned at the beginning of the file data. io.EOF is returned if
+// there are no more files in the archive.
+//
+// Both BSD and GNU / SysV naming conventions are supported.
+func readMetadata(r *bufio.Reader, nameData *[]byte) (name string, size int64, err error) {
+retry:
+	// Each file is preceded by a 60-byte header that contains its metadata.
+	// We only care about two fields, name and size. Other fields (mtime,
+	// owner, group, mode) are ignored because they don't affect compilation.
+	var entry [entryLength]byte
 	if _, err := io.ReadFull(r, entry[:]); err != nil {
 		return "", 0, err
 	}
@@ -132,11 +150,13 @@ func readBSDEntry(r io.Reader) (name string, size int64, err error) {
 		return "", 0, err
 	}
 
-	nameField := string(entry[:16])
-	if !strings.HasPrefix(nameField, "#1/") {
-		name = nameField
-	} else {
-		nameField = strings.TrimSpace(nameField[len("#1/"):])
+	nameField := strings.TrimRight(string(entry[:16]), " ")
+	switch {
+	case strings.HasPrefix(nameField, "#1/"):
+		// BSD-style name. The number of bytes in the name is written here in
+		// ASCII, right-padded with spaces. The actual name is stored at the
+		// beginning of the file data, left-padded with NUL bytes.
+		nameField = nameField[len("#1/"):]
 		nameLen, err := strconv.ParseInt(nameField, 10, 64)
 		if err != nil {
 			return "", 0, err
@@ -147,15 +167,62 @@ func readBSDEntry(r io.Reader) (name string, size int64, err error) {
 		}
 		name = strings.TrimRight(string(nameBuf), "\x00")
 		size -= nameLen
+
+	case nameField == "//":
+		// GNU / SysV-style name data. This is a fake file that contains names
+		// for files with long names. We read this into nameData, then read
+		// the next entry.
+		*nameData = make([]byte, size)
+		if _, err := io.ReadFull(r, *nameData); err != nil {
+			return "", 0, err
+		}
+		if size%2 != 0 {
+			// Files are aligned at 2-byte offsets. Discard the padding byte if the
+			// size was odd.
+			if _, err := r.ReadByte(); err != nil {
+				return "", 0, err
+			}
+		}
+		goto retry
+
+	case nameField == "/":
+		// GNU / SysV-style symbol lookup table. Skip.
+		if err := skipFile(r, size); err != nil {
+			return "", 0, err
+		}
+		goto retry
+
+	case strings.HasPrefix(nameField, "/"):
+		// GNU / SysV-style long file name. The number that follows the slash is
+		// an offset into the name data that should have been read earlier.
+		// The file name ends with a slash.
+		nameField = nameField[1:]
+		nameOffset, err := strconv.Atoi(nameField)
+		if err != nil {
+			return "", 0, err
+		}
+		if nameData == nil || nameOffset < 0 || nameOffset >= len(*nameData) {
+			return "", 0, fmt.Errorf("invalid name length: %d", nameOffset)
+		}
+		i := bytes.IndexByte((*nameData)[nameOffset:], '/')
+		if i < 0 {
+			return "", 0, errors.New("file name does not end with '/'")
+		}
+		name = string((*nameData)[nameOffset : nameOffset+i])
+
+	case strings.HasSuffix(nameField, "/"):
+		// GNU / SysV-style short file name.
+		name = nameField[:len(nameField)-1]
+
+	default:
+		// Common format name.
+		name = nameField
 	}
 
 	return name, size, err
 }
 
-func readGNUEntry(r io.Reader) (name string, size int64, err error) {
-	panic("not implemented")
-}
-
+// extractFile reads size bytes from r and writes them to a new file, name.
 func extractFile(r *bufio.Reader, name string, size int64) error {
 	w, err := os.Create(name)
 	if err != nil {
@@ -167,6 +234,8 @@ func extractFile(r *bufio.Reader, name string, size int64) error {
 		return err
 	}
 	if size%2 != 0 {
+		// Files are aligned at 2-byte offsets. Discard the padding byte if the
+		// size was odd.
 		if _, err := r.ReadByte(); err != nil {
 			return err
 		}
@@ -174,14 +243,18 @@ func extractFile(r *bufio.Reader, name string, size int64) error {
 	return nil
 }
 
-func filterFileNames(names []string) []string {
-	filtered := make([]string, 0, len(names))
-	for _, name := range names {
-		if strings.HasSuffix(name, ".o") {
-			filtered = append(filtered, name)
-		}
+func skipFile(r *bufio.Reader, size int64) error {
+	if size%2 != 0 {
+		// Files are aligned at 2-byte offsets. Discard the padding byte if the
+		// size was odd.
+		size += 1
 	}
-	return filtered
+	_, err := r.Discard(int(size))
+	return err
+}
+
+func isObjectFile(name string) bool {
+	return strings.HasSuffix(name, ".o")
 }
 
 func appendFiles(gotool, archive string, files []string) error {
