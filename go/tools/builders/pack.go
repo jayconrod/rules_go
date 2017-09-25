@@ -17,18 +17,20 @@
 package main
 
 import (
+	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
 func run(args []string) error {
 	flags := flag.NewFlagSet("pack", flag.ContinueOnError)
 	gotool := flags.String("gotool", "", "Path to the go tool")
-	ar := flags.String("ar", "", "Path to the archive tool")
 	inArchive := flags.String("in", "", "Path to input archive")
 	outArchive := flags.String("out", "", "Path to output archive")
 	objects := multiFlag{}
@@ -43,20 +45,15 @@ func run(args []string) error {
 	}
 
 	if *archive != "" {
-		archiveObjects, err := listFiles(*ar, *archive)
+		archiveFiles, err := extractFiles(*archive, "bsd")
 		if err != nil {
 			return err
 		}
-		cmd := exec.Command(*ar, "x", *archive)
-		if err := cmd.Run(); err != nil {
-			return err
-		}
+		archiveObjects := filterFileNames(archiveFiles)
 		objects = append(objects, archiveObjects...)
 	}
 
-	packArgs := append([]string{"tool", "pack", "r", *outArchive}, objects...)
-	cmd := exec.Command(*gotool, packArgs...)
-	return cmd.Run()
+	return appendFiles(*gotool, *outArchive, objects)
 }
 
 func main() {
@@ -80,19 +77,115 @@ func copyFile(inPath, outPath string) error {
 	return err
 }
 
-func listFiles(ar, archive string) ([]string, error) {
-	cmd := exec.Command(ar, "t", archive)
-	out, err := cmd.Output()
+const (
+	arHeader = "!<arch>\n"
+	entryLen = 60
+)
+
+func extractFiles(archive, format string) (files []string, err error) {
+	f, err := os.Open(archive)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(out), "\n")
-	var files []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			files = append(files, line)
+	defer f.Close()
+	r := bufio.NewReader(f)
+
+	header := make([]byte, len(arHeader))
+	if _, err := io.ReadFull(r, header); err != nil || string(header) != arHeader {
+		return nil, fmt.Errorf("%s: bad header", archive)
+	}
+
+	for {
+		var name string
+		var size int64
+		switch format {
+		case "bsd":
+			name, size, err = readBSDEntry(r)
+		case "gnu":
+			name, size, err = readGNUEntry(r)
+		default:
+			return nil, fmt.Errorf("%s: unknown format: %s", archive, format)
+		}
+		if err == io.EOF {
+			return files, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if err := extractFile(r, name, size); err != nil {
+			return nil, err
+		}
+		files = append(files, name)
+	}
+}
+
+func readBSDEntry(r io.Reader) (name string, size int64, err error) {
+	var entry [entryLen]byte
+	if _, err := io.ReadFull(r, entry[:]); err != nil {
+		return "", 0, err
+	}
+
+	sizeField := strings.TrimSpace(string(entry[48:58]))
+	size, err = strconv.ParseInt(sizeField, 10, 64)
+	if err != nil {
+		return "", 0, err
+	}
+
+	nameField := string(entry[:16])
+	if !strings.HasPrefix(nameField, "#1/") {
+		name = nameField
+	} else {
+		nameField = strings.TrimSpace(nameField[len("#1/"):])
+		nameLen, err := strconv.ParseInt(nameField, 10, 64)
+		if err != nil {
+			return "", 0, err
+		}
+		nameBuf := make([]byte, nameLen)
+		if _, err := io.ReadFull(r, nameBuf); err != nil {
+			return "", 0, err
+		}
+		name = strings.TrimRight(string(nameBuf), "\x00")
+		size -= nameLen
+	}
+
+	return name, size, err
+}
+
+func readGNUEntry(r io.Reader) (name string, size int64, err error) {
+	panic("not implemented")
+}
+
+func extractFile(r *bufio.Reader, name string, size int64) error {
+	w, err := os.Create(name)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	_, err = io.CopyN(w, r, size)
+	if err != nil {
+		return err
+	}
+	if size%2 != 0 {
+		if _, err := r.ReadByte(); err != nil {
+			return err
 		}
 	}
-	return files, nil
+	return nil
+}
+
+func filterFileNames(names []string) []string {
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.HasSuffix(name, ".o") {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
+}
+
+func appendFiles(gotool, archive string, files []string) error {
+	args := append([]string{"tool", "pack", "r", archive}, files...)
+	cmd := exec.Command(gotool, args...)
+	return cmd.Run()
 }
