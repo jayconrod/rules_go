@@ -21,6 +21,8 @@ load("@io_bazel_rules_go//go/private:providers.bzl",
     "CgoInfo",
     "GoLibrary",
     "GoEmbed",
+    "MakeGoEmbed",
+    "MakeGoLibrary",
 )
 load("@io_bazel_rules_go//go/private:actions/archive.bzl",
     "get_archive",
@@ -100,7 +102,7 @@ def emit_library(ctx, go_toolchain,
   for d in dep_runfiles:
     runfiles = runfiles.merge(d)
 
-  golib = GoLibrary(
+  golib = MakeGoLibrary(
       label = ctx.label,
       importpath = importpath, # The import path for this library
       direct = direct, # The direct depencancies of the library
@@ -109,8 +111,8 @@ def emit_library(ctx, go_toolchain,
       cover_vars = cover_vars, # The cover variables for this library
       runfiles = runfiles, # The runfiles needed for things including this library
   )
-  goembed = GoEmbed(
-      srcs = srcs, # The original sources
+  goembed = MakeGoEmbed(
+      srcs = depset(srcs), # The original sources
       build_srcs = build_srcs, # The transformed sources actually compiled
       deps = direct, # The direct depencancies of the library
       cover_vars = cover_vars, # The cover variables for these sources
