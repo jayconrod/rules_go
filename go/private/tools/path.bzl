@@ -31,13 +31,9 @@ load(
     "go_rule",
 )
 
-def _tag(go, path, outputs):
-  """this generates a existance tag file for dependencies, and returns the path to the tag file"""
-  tag = go.declare_file(go, path=path+".tag")
-  path, _, _ = tag.short_path.rpartition("/")
-  go.actions.write(tag, content="")
-  outputs.append(tag)
-  return path
+def _effective_importpath(archive):
+  # DO NOT SUBMIT: support vendoring
+  return archive.importpath
 
 def _go_path_impl(ctx):
   print("""
@@ -45,6 +41,46 @@ EXPERIMENTAL: the go_path rule is still very experimental
 Please do not rely on it for production use, but feel free to use it and file issues
 """)
   go = go_context(ctx)
+
+  # Gather all packages.
+  direct_archives = []
+  transitive_archives = []
+  for dep in ctx.attr.deps:
+    archive = get_archive(dep)
+    direct_archives.append(archive.data)
+    transitive_archives.append(archive.transitive)
+  archives = depset(direct = direct_archives, transitive = transitive_archives)
+
+  # Build a map of files to write into the output directory.
+  inputs = []
+  file_map = []
+  for archive in as_iterable(archives):
+    # DO NOT SUBMIT
+    # TODO: detect duplicate packages
+    # TODO: skip packages with missing imports
+    # TODO: runfiles
+    importpath = _effective_importpath(archive)
+    out_prefix = "src/" + importpath + "/"
+    for src in archive.orig_srcs:
+      inputs.append(src)
+      file_map.append((src.path, out_prefix + src.basename))
+    
+  # Execute the builder
+  if ctx.attr.mode == "archive":
+    out = ctx.actions.declare_file(ctx.label.name + ".zip")
+  else:
+    out = ctx.actions.declare_directory(ctx.label.name + ".d")
+  manifest = ctx.actions.declare_file(ctx.label.name + "~manifest")
+  ctx.actions.write(manifest, "\n".join(
+  ctx.actions.run(
+    outputs = [out],
+    inputs = inputs,
+    executable = ctx.file._gopath,
+    
+  
+    
+
+
   #TODO: non specific mode?
   # First gather all the library rules
   golibs = depset()
@@ -130,6 +166,7 @@ go_path = go_rule(
             values = [
                 "link",
                 "copy",
+                "archive",
             ],
         ),
     },
