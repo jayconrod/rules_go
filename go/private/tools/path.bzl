@@ -30,10 +30,6 @@ load(
     "@io_bazel_rules_go//go/private:rules/rule.bzl",
     "go_rule",
 )
-load(
-    "@io_bazel_rules_go//go/private/skylib/lib/shell.bzl",
-    "shell",
-)
 
 def _effective_importpath(archive):
   # DO NOT SUBMIT: support vendoring
@@ -56,18 +52,24 @@ Please do not rely on it for production use, but feel free to use it and file is
   # Build a map of files to write into the output directory.
   inputs = []
   manifest_entries = []
+  seen = {}
   for archive in as_iterable(archives):
     # DO NOT SUBMIT
     # TODO: detect duplicate packages
     # TODO: skip packages with missing imports
     # TODO: runfiles
     importpath = _effective_importpath(archive)
+    if importpath == "":
+      continue
+    if importpath in seen:
+      fail("multiple packages provide importpath {} ({} and {})".format(
+          importpath, str(archive.data.label), str(seen[importpath].data.name)))
+    seen[importpath] = archive
     out_prefix = "src/" + importpath + "/"
     for src in archive.orig_srcs:
       inputs.append(src)
-      manifest_entry = "{'from': {}, 'to': {}}".format(
-          shell.quote(src.path), shell.quote(out_prefix + src.basename))
-      manifest_entries.append(manifest_entry)
+      manifest_entry = struct(src = src.path, dst = out_prefix + src.basename)
+      manifest_entries.append(manifest_entry.to_json())
     
   # Create a manifest for the builder.
   manifest = ctx.actions.declare_file(ctx.label.name + "~manifest")
@@ -88,11 +90,16 @@ Please do not rely on it for production use, but feel free to use it and file is
   ctx.actions.run(
       outputs = [out],
       inputs = inputs,
-      executable = ctx.file._go_path,
-      args = args,
+      mnemonic = "GoPath",
+      executable = ctx.executable._go_path,
+      arguments = args,
   )
 
-  return [DefaultInfo(files = depset([out]))]
+  runfiles = ctx.runfiles(files = [out])
+  return [DefaultInfo(
+      files = depset([out]),
+      runfiles = runfiles,
+  )]
 
 go_path = rule(
     _go_path_impl,
@@ -109,6 +116,7 @@ go_path = rule(
         "_go_path": attr.label(
             default = "@io_bazel_rules_go//go/tools/builders:go_path",
             executable = True,
+            cfg = "host",
         ),
     },
 )

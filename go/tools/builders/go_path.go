@@ -51,7 +51,7 @@ func modeFromString(s string) (mode, error) {
 }
 
 type manifestEntry struct {
-	From, To string
+	Src, Dst string
 }
 
 func main() {
@@ -64,9 +64,9 @@ func main() {
 func run(args []string) error {
 	var manifest, out string
 	flags := flag.NewFlagSet("go_path", flag.ContinueOnError)
-	flag.StringVar(&manifest, "manifest", "", "name of json file listing files to include")
-	flag.StringVar(&out, "out", "", "output file or directory")
-	modeFlag := flag.String("mode", "", "copy, link, or archive")
+	flags.StringVar(&manifest, "manifest", "", "name of json file listing files to include")
+	flags.StringVar(&out, "out", "", "output file or directory")
+	modeFlag := flags.String("mode", "", "copy, link, or archive")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -89,66 +89,71 @@ func run(args []string) error {
 		return err
 	}
 
-	var outDir String
-	if mode == archiveMode {
-		outDir, err := ioutil.TempDir("", "go_path")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(outDir)
-	} else {
-		outDir = out
-		if err := os.MkdirAll(outDir, 0777); err != nil {
-			return err
-		}
+	switch mode {
+	case copyMode:
+		err = copyPath(out, entries)
+	case linkMode:
+		err = linkPath(out, entries)
+	case archiveMode:
+		err = archivePath(out, entries)
 	}
-
-	for _, entry := range entries {
-		from := filepath.FromSlash(entry.From)
-		to := filepath.Join(outDir, filepath.FromSlash(entry.To))
-		toDir := filepath.Dir(to)
-		if err := os.MkdirAll(toDir, 0777); err != nil {
-			return err
-		}
-		if mode == linkMode {
-			rel, err := filepath.Rel(toDir, from)
-			if err != nil {
-				return err
-			}
-			if err := os.Symlink(from, to); err != nil {
-				return err
-			}
-		} else {
-			fromFile, err := os.Open(from)
-			if err != nil {
-				return err
-			}
-			defer fromFile.Close()
-			toFile, err := os.Create(to)
-			if err != nil {
-				return err
-			}
-			if err := io.Copy(toFile, fromFile); err != nil {
-				toFile.Close()
-				return err
-			}
-			if err := toFile.Close(); err != nil {
-				return err
-			}
-		}
-	}
+	return err
 }
 
 func readManifest(path string) ([]manifestEntry, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading manifest: %v", err)
 	}
 	var entries []manifestEntry
-	if err := json.Unmarshal(manifestData, &entries); err != nil {
-		return nil, err
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("error unmarshalling manifest %s: %v", path, err)
 	}
 	return entries, nil
+}
+
+func copyPath(out string, manifest []manifestEntry) error {
+	if err := os.MkdirAll(out, 0777); err != nil {
+		return err
+	}
+	for _, entry := range manifest {
+		dst := filepath.Join(out, filepath.FromSlash(entry.Dst))
+		if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
+			return err
+		}
+		srcFile, err := os.Open(entry.Src)
+		if err != nil {
+			return err
+		}
+		dstFile, err := os.Create(dst)
+		if err != nil {
+			srcFile.Close()
+			return err
+		}
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			dstFile.Close()
+			srcFile.Close()
+			return err
+		}
+		dstFile.Close()
+		if err := srcFile.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkPath(out string, manifest []manifestEntry) error {
+	if err := os.MkdirAll(out, 0777); err != nil {
+		return err
+	}
+	for _, entry := range manifest {
+		src := filepath.Join(out, filepath.FromSlash(entry.Src))
+		if err := os.Symlink(entry.Dst, src); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func archivePath(out string, manifest []manifestEntry) (err error) {
@@ -165,24 +170,25 @@ func archivePath(out string, manifest []manifestEntry) (err error) {
 	outZip := zip.NewWriter(outBuffer)
 
 	for _, entry := range manifest {
-		inFile, err := os.Open(entry.From)
+		srcFile, err := os.Open(entry.Src)
 		if err != nil {
 			return err
 		}
-		w, err := outZip.Create(entry.To)
+		w, err := outZip.Create(entry.Dst)
 		if err != nil {
-			inFile.Close()
+			srcFile.Close()
 			return err
 		}
-		if err := io.Copy(w, inFile); err != nil {
-			inFile.Close()
+		if _, err := io.Copy(w, srcFile); err != nil {
+			srcFile.Close()
 			return err
 		}
-		inFile.Close()
+		srcFile.Close()
 	}
 
 	if err := outZip.Close(); err != nil {
 		return err
 	}
 	outFile = nil
+	return nil
 }

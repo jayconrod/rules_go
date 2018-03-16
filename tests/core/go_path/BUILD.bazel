@@ -1,0 +1,22 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_path", "go_test")
+
+test_suite(name = "go_path")
+
+go_path(
+    name = "copy_path",
+    deps = [
+        "//tests/core/go_path/cmd/bin",
+        "//tests/core/go_path/pkg/lib:go_default_library",
+        # TODO(#1329): pkg/lib:go_default_test
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["go_path_test.go"],
+    args = [
+        "-copy_path=$(location :copy_path)",
+    ],
+    data = [":copy_path"],
+    rundir = ".",
+)
