@@ -30,6 +30,10 @@ load(
     "@io_bazel_rules_go//go/private:rules/rule.bzl",
     "go_rule",
 )
+load(
+    "@io_bazel_rules_go//go/private/skylib/lib/shell.bzl",
+    "shell",
+)
 
 def _effective_importpath(archive):
   # DO NOT SUBMIT: support vendoring
@@ -40,8 +44,6 @@ def _go_path_impl(ctx):
 EXPERIMENTAL: the go_path rule is still very experimental
 Please do not rely on it for production use, but feel free to use it and file issues
 """)
-  go = go_context(ctx)
-
   # Gather all packages.
   direct_archives = []
   transitive_archives = []
@@ -53,7 +55,7 @@ Please do not rely on it for production use, but feel free to use it and file is
 
   # Build a map of files to write into the output directory.
   inputs = []
-  file_map = []
+  manifest_entries = []
   for archive in as_iterable(archives):
     # DO NOT SUBMIT
     # TODO: detect duplicate packages
@@ -63,101 +65,36 @@ Please do not rely on it for production use, but feel free to use it and file is
     out_prefix = "src/" + importpath + "/"
     for src in archive.orig_srcs:
       inputs.append(src)
-      file_map.append((src.path, out_prefix + src.basename))
+      manifest_entry = "{'from': {}, 'to': {}}".format(
+          shell.quote(src.path), shell.quote(out_prefix + src.basename))
+      manifest_entries.append(manifest_entry)
     
+  # Create a manifest for the builder.
+  manifest = ctx.actions.declare_file(ctx.label.name + "~manifest")
+  inputs.append(manifest)
+  manifest_content = "[\n  " + ",\n  ".join(manifest_entries) + "\n]"
+  ctx.actions.write(manifest, manifest_content)
+
   # Execute the builder
   if ctx.attr.mode == "archive":
     out = ctx.actions.declare_file(ctx.label.name + ".zip")
   else:
     out = ctx.actions.declare_directory(ctx.label.name + ".d")
-  manifest = ctx.actions.declare_file(ctx.label.name + "~manifest")
-  ctx.actions.write(manifest, "\n".join(
-  ctx.actions.run(
-    outputs = [out],
-    inputs = inputs,
-    executable = ctx.file._gopath,
-    
-  
-    
-
-
-  #TODO: non specific mode?
-  # First gather all the library rules
-  golibs = depset()
-  archives_runfiles = {}
-  for dep in ctx.attr.deps:
-    archive = get_archive(dep)
-    golibs += archive.transitive
-    importpath = archive.source.library.importpath
-    if importpath:
-      archives_runfiles[importpath] = archive.source.runfiles
-
-  # Now scan them for sources
-  seen_libs = {}
-  seen_paths = {}
-  outputs = []
-  packages = []
-  for golib in as_iterable(golibs):
-    if not golib.importpath:
-      print("Missing importpath on {}".format(golib.label))
-      continue
-    if golib.importpath in seen_libs:
-      # We found two different library rules that map to the same import path
-      # This is legal in bazel, but we can't build a valid go path for it.
-      # TODO: we might be able to ignore this if the content is identical
-      print("""Duplicate package
-Found {} in
-  {}
-  {}
-""".format(golib.importpath, golib.label, seen_libs[golib.importpath].label))
-      # for now we don't fail if we see duplicate packages
-      # the most common case is the same source from two different workspaces
-      continue
-    seen_libs[golib.importpath] = golib
-    package_files = []
-    prefix = "src/" + golib.importpath + "/"
-    golib_files = golib.srcs
-    if golib.importpath in archives_runfiles:
-      golib_files = list(golib.srcs) + as_iterable(archives_runfiles[golib.importpath].files)
-    for src in golib_files:
-      outpath = prefix + src.basename
-      if outpath in seen_paths:
-        # If we see the same path twice, it's a fatal error
-        fail("Duplicate path {}".format(outpath))
-      seen_paths[outpath] = True
-      out = go.declare_file(go, path=outpath)
-      package_files += [out]
-      outputs += [out]
-      if ctx.attr.mode == "copy":
-        ctx.actions.expand_template(template=src, output=out, substitutions={})
-      elif ctx.attr.mode == "link":
-        ctx.actions.run_shell(
-            command='ln -s $(readlink "$1") "$2"',
-            arguments=[src.path, out.path],
-            mnemonic = "GoLn",
-            inputs=[src],
-            outputs=[out],
-        )
-      else:
-        fail("Invalid go path mode '{}'".format(ctx.attr.mode))
-    packages += [struct(
-      golib = golib,
-      dir = _tag(go, prefix, outputs),
-      files = package_files,
-    )]
-  gopath = _tag(go, "", outputs)
-  return [
-      DefaultInfo(
-          files = depset(outputs),
-      ),
-      GoPath(
-        gopath = gopath,
-        packages = packages,
-        srcs = outputs,
-      )
+  args = [
+      "-manifest=" + manifest.path,
+      "-out=" + out.path,
+      "-mode=" + ctx.attr.mode,
   ]
+  ctx.actions.run(
+      outputs = [out],
+      inputs = inputs,
+      executable = ctx.file._go_path,
+      args = args,
+  )
 
-go_path = go_rule(
+  return [DefaultInfo(files = depset([out]))]
+
+go_path = rule(
     _go_path_impl,
     attrs = {
         "deps": attr.label_list(providers = [GoLibrary]),
@@ -168,6 +105,10 @@ go_path = go_rule(
                 "copy",
                 "archive",
             ],
+        ),
+        "_go_path": attr.label(
+            default = "@io_bazel_rules_go//go/tools/builders:go_path",
+            executable = True,
         ),
     },
 )
