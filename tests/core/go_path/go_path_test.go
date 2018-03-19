@@ -17,7 +17,6 @@ package go_path
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,6 +37,7 @@ func TestCopyPath(t *testing.T) {
 		t.Fatal("-copy_path not set")
 	}
 	checkPath(t, copyPath, []fileSpec{
+		{path: "extra.txt"},
 		{path: "src", ty: os.ModeDir},
 		{path: "src/example.com/repo/cmd/bin/bin", ty: absent},
 		{path: "src/example.com/repo/cmd/bin/bin.go"},
@@ -57,11 +57,8 @@ type fileSpec struct {
 }
 
 func checkPath(t *testing.T, dir string, files []fileSpec) {
-	cwd, _ := os.Getwd()
-	fmt.Fprintf(os.Stderr, "running in %s\n", cwd)
 	for _, f := range files {
 		path := filepath.Join(dir, filepath.FromSlash(f.path))
-		fmt.Fprintf(os.Stderr, "checking %s\n", path)
 		st, err := os.Stat(path)
 		if f.ty == absent {
 			if err == nil {

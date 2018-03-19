@@ -187,7 +187,7 @@ func archivePath(out string, manifest []manifestEntry) (err error) {
 	}
 
 	if err := outZip.Close(); err != nil {
-		return err
+		return fmt.Errorf("error constructing archive %s: %v", out, err)
 	}
 	outFile = nil
 	return nil

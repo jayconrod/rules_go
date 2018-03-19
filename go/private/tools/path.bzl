@@ -32,7 +32,7 @@ load(
 )
 
 def _effective_importpath(archive):
-  # DO NOT SUBMIT: support vendoring
+  # TODO: support vendoring
   return archive.importpath
 
 def _go_path_impl(ctx):
@@ -54,7 +54,6 @@ Please do not rely on it for production use, but feel free to use it and file is
   manifest_entries = []
   seen = {}
   for archive in as_iterable(archives):
-    # DO NOT SUBMIT
     # TODO: detect duplicate packages
     # TODO: skip packages with missing imports
     # TODO: runfiles
@@ -66,11 +65,16 @@ Please do not rely on it for production use, but feel free to use it and file is
           importpath, str(archive.data.label), str(seen[importpath].data.name)))
     seen[importpath] = archive
     out_prefix = "src/" + importpath + "/"
-    for src in archive.orig_srcs:
+    for src in archive.orig_srcs + archive.data_files:
       inputs.append(src)
       manifest_entry = struct(src = src.path, dst = out_prefix + src.basename)
       manifest_entries.append(manifest_entry.to_json())
     
+  for src in ctx.files.data:
+    inputs.append(src)
+    manifest_entry = struct(src = src.path, dst = src.basename)
+    manifest_entries.append(manifest_entry.to_json())
+
   # Create a manifest for the builder.
   manifest = ctx.actions.declare_file(ctx.label.name + "~manifest")
   inputs.append(manifest)
@@ -105,6 +109,10 @@ go_path = rule(
     _go_path_impl,
     attrs = {
         "deps": attr.label_list(providers = [GoLibrary]),
+        "data": attr.label_list(
+            allow_files = True,
+            cfg = "data",
+        ),
         "mode": attr.string(
             default = "copy",
             values = [
