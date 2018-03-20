@@ -111,7 +111,7 @@ def _new_library(go, name=None, importpath=None, resolver=None, importable=True,
       label = go._ctx.label,
       importpath = importpath,
       importmap = importmap,
-      pathtype = go.pathtype if importable else EXPORT_PATH,
+      pathtype = go.pathtype,
       resolve = resolver,
       testfilter = testfilter,
       **kwargs

@@ -18,6 +18,19 @@ go_test(
     visibility = ["//visibility:public"],
 )
 
+go_test(
+    name = "embed_test",
+    embed = [":embed_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_library(
+    name = "embed_lib",
+    srcs = ["embed_test.go"],
+    importpath = "example.com/repo/pkg/lib",
+    visibility = ["//visibility:public"],
+)
+
 go_library(
     name = "vendored",
     srcs = ["vendored.go"],

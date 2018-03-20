@@ -84,6 +84,7 @@ def emit_archive(go, source=None):
       label = source.library.label,
       importpath = source.library.importpath,
       importmap = source.library.importmap,
+      pathtype = source.library.pathtype,
       file = out_lib,
       srcs = as_tuple(source.srcs),
       orig_srcs = as_tuple(source.orig_srcs),

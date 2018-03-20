@@ -15,10 +15,11 @@
 load(
     "@io_bazel_rules_go//go/private:context.bzl",
     "go_context",
+    "EXPLICIT_PATH",
 )
 load(
     "@io_bazel_rules_go//go/private:providers.bzl",
-    "GoLibrary",
+    "GoArchive",
     "GoPath",
     "get_archive",
 )
@@ -30,22 +31,6 @@ load(
     "@io_bazel_rules_go//go/private:rules/rule.bzl",
     "go_rule",
 )
-
-def _effective_importpath(archive):
-  importpath = archive.importpath
-  importmap = archive.importmap
-  if importpath == "" or importmap == importpath:
-    return importpath
-  parts = importmap.split("/")
-  if "vendor" not in parts:
-    # Unusual case not handled by go build. Just return importpath.
-    return importpath
-  elif len(parts) > 2 and archive.label.workspace_root == "external/" + parts[0]:
-    # Common case for importmap set by Gazelle in external repos.
-    return "/".join(parts[1:])
-  else:
-    # Vendor directory somewhere in the main repo. Leave it alone.
-    return importmap
 
 def _go_path_impl(ctx):
   print("""
@@ -64,18 +49,10 @@ Please do not rely on it for production use, but feel free to use it and file is
   # Build a map of files to write into the output directory.
   inputs = []
   manifest_entries = []
-  seen = {}
   for archive in as_iterable(archives):
     importpath = _effective_importpath(archive)
     if importpath == "":
-      fail("Package does not have an importpath: {}".format(archive.label))
-    if importpath in seen:
-      print("""Duplicate package
-Found {} in
-  {}
-  {}
-""".format(importpath, str(archive.label), str(seen[importpath].label)))
-    seen[importpath] = archive
+      continue
     out_prefix = "src/" + importpath + "/"
     for src in archive.orig_srcs + archive.data_files:
       inputs.append(src)
@@ -116,11 +93,12 @@ Found {} in
       files = depset([out]),
       runfiles = runfiles,
   )]
+  # TODO: GoPath provider?
 
 go_path = rule(
     _go_path_impl,
     attrs = {
-        "deps": attr.label_list(providers = [GoLibrary]),
+        "deps": attr.label_list(providers = [GoArchive]),
         "data": attr.label_list(
             allow_files = True,
             cfg = "data",
@@ -140,3 +118,21 @@ go_path = rule(
         ),
     },
 )
+
+def _effective_importpath(archive):
+  if archive.pathtype != EXPLICIT_PATH:
+    return ""
+  importpath = archive.importpath
+  importmap = archive.importmap
+  if importpath.endswith("_test"): importpath = importpath[:-len("_test")]
+  if importmap.endswith("_test"): importmap = importmap[:-len("_test")]
+  parts = importmap.split("/")
+  if "vendor" not in parts:
+    # Unusual case not handled by go build. Just return importpath.
+    return importpath
+  elif len(parts) > 2 and archive.label.workspace_root == "external/" + parts[0]:
+    # Common case for importmap set by Gazelle in external repos.
+    return "/".join(parts[1:])
+  else:
+    # Vendor directory somewhere in the main repo. Leave it alone.
+    return importmap

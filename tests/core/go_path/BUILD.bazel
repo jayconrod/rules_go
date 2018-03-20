@@ -7,10 +7,13 @@ test_suite(name = "go_path")
     deps = [
         "//tests/core/go_path/cmd/bin",
         "//tests/core/go_path/pkg/lib:go_default_library",
+        "//tests/core/go_path/pkg/lib:embed_test",
+        "//tests/core/go_path/pkg/lib:go_default_test",
         "//tests/core/go_path/pkg/lib:vendored",
     ],
     data = ["extra.txt"],
     mode = mode,
+    testonly = True,
 ) for mode in ("copy", "archive")]
 
 go_test(
@@ -18,6 +21,7 @@ go_test(
     srcs = ["go_path_test.go"],
     args = [
         "-copy_path=$(location :copy_path)",
+        # TODO: other tests
     ],
     data = [":copy_path"],
     rundir = ".",
