@@ -66,15 +66,15 @@ Please do not rely on it for production use, but feel free to use it and file is
   manifest_entries = []
   seen = {}
   for archive in as_iterable(archives):
-    # TODO: detect duplicate packages
-    # TODO: skip packages with missing imports
-    # TODO: runfiles
     importpath = _effective_importpath(archive)
     if importpath == "":
-      continue
+      fail("Package does not have an importpath: {}".format(archive.label))
     if importpath in seen:
-      fail("multiple packages provide importpath {} ({} and {})".format(
-          importpath, str(archive.data.label), str(seen[importpath].data.name)))
+      print("""Duplicate package
+Found {} in
+  {}
+  {}
+""".format(importpath, str(archive.label), str(seen[importpath].label)))
     seen[importpath] = archive
     out_prefix = "src/" + importpath + "/"
     for src in archive.orig_srcs + archive.data_files:
@@ -97,7 +97,7 @@ Please do not rely on it for production use, but feel free to use it and file is
   if ctx.attr.mode == "archive":
     out = ctx.actions.declare_file(ctx.label.name + ".zip")
   else:
-    out = ctx.actions.declare_directory(ctx.label.name + ".d")
+    out = ctx.actions.declare_directory(ctx.label.name)
   args = [
       "-manifest=" + manifest.path,
       "-out=" + out.path,
