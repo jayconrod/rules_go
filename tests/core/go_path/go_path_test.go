@@ -16,16 +16,17 @@ limitations under the License.
 package go_path
 
 import (
+	"archive/zip"
 	"flag"
+	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-var (
-	copyPath string
-)
+var copyPath, linkPath, archivePath string
 
 var files = []string{
 	"extra.txt",
@@ -45,6 +46,8 @@ var files = []string{
 
 func TestMain(m *testing.M) {
 	flag.StringVar(&copyPath, "copy_path", "", "path to copied go_path")
+	flag.StringVar(&linkPath, "link_path", "", "path to symlinked go_path")
+	flag.StringVar(&archivePath, "archive_path", "", "path to archive go_path")
 	flag.Parse()
 	os.Exit(m.Run())
 }
@@ -54,6 +57,54 @@ func TestCopyPath(t *testing.T) {
 		t.Fatal("-copy_path not set")
 	}
 	checkPath(t, copyPath, files, os.FileMode(0))
+}
+
+func TestLinkPath(t *testing.T) {
+	t.Skip()
+	if linkPath == "" {
+		t.Fatal("-link_path not set")
+	}
+	checkPath(t, linkPath, files, os.ModeSymlink)
+}
+
+func TestArchivePath(t *testing.T) {
+	if archivePath == "" {
+		t.Fatal("-archive_path not set")
+	}
+	dir, err := ioutil.TempDir(os.Getenv("TEST_TEMPDIR"), "TestArchivePath")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	z, err := zip.OpenReader(archivePath)
+	if err != nil {
+		t.Fatalf("error opening zip: %v", err)
+	}
+	defer z.Close()
+	for _, f := range z.File {
+		r, err := f.Open()
+		if err != nil {
+			t.Fatalf("error reading file %s: %v", f.Name, err)
+		}
+		dstPath := filepath.Join(dir, filepath.FromSlash(f.Name))
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0777); err != nil {
+			t.Fatalf("error creating directory %s: %v", filepath.Dir(dstPath), err)
+		}
+		w, err := os.Create(dstPath)
+		if err != nil {
+			t.Fatalf("error creating file %s: %v", dstPath, err)
+		}
+		if _, err := io.Copy(w, r); err != nil {
+			w.Close()
+			t.Fatalf("error writing file %s: %v", dstPath, err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("error closing file %s: %v", dstPath, err)
+		}
+	}
+
+	checkPath(t, dir, files, os.FileMode(0))
 }
 
 // checkPath checks that dir contains a list of files. files is a list of

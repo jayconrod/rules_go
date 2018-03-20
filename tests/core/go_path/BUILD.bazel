@@ -20,9 +20,13 @@ go_test(
     name = "go_default_test",
     srcs = ["go_path_test.go"],
     args = [
+        "-archive_path=$(location :archive_path)",
         "-copy_path=$(location :copy_path)",
-        # TODO: other tests
+        # TODO: -link_path. symlinks outside tree artifacts are not allowed.
     ],
-    data = [":copy_path"],
+    data = [
+        ":archive_path",
+        ":copy_path"
+    ],
     rundir = ".",
 )

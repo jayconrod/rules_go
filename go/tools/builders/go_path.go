@@ -16,7 +16,6 @@ package main
 
 import (
 	"archive/zip"
-	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -148,8 +147,11 @@ func linkPath(out string, manifest []manifestEntry) error {
 		return err
 	}
 	for _, entry := range manifest {
-		src := filepath.Join(out, filepath.FromSlash(entry.Src))
-		if err := os.Symlink(entry.Dst, src); err != nil {
+		dst := filepath.Join(out, filepath.FromSlash(entry.Dst))
+		if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
+			return err
+		}
+		if err := os.Symlink(entry.Src, dst); err != nil {
 			return err
 		}
 	}
@@ -163,11 +165,10 @@ func archivePath(out string, manifest []manifestEntry) (err error) {
 	}
 	defer func() {
 		if e := outFile.Close(); err == nil && e != nil {
-			err = e
+			err = fmt.Errorf("error closing archive %s: %v", out, e)
 		}
 	}()
-	outBuffer := bufio.NewWriter(outFile)
-	outZip := zip.NewWriter(outBuffer)
+	outZip := zip.NewWriter(outFile)
 
 	for _, entry := range manifest {
 		srcFile, err := os.Open(entry.Src)
@@ -189,6 +190,5 @@ func archivePath(out string, manifest []manifestEntry) (err error) {
 	if err := outZip.Close(); err != nil {
 		return fmt.Errorf("error constructing archive %s: %v", out, err)
 	}
-	outFile = nil
 	return nil
 }
