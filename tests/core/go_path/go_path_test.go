@@ -19,12 +19,23 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 var (
 	copyPath string
 )
+
+var files = []string{
+	"extra.txt",
+	"src/",
+	"-src/example.com/repo/cmd/bin/bin",
+	"src/example.com/repo/cmd/bin/bin.go",
+	"src/example.com/repo/pkg/lib/lib.go",
+	"src/example.com/repo/pkg/lib/data.txt",
+	"src/example.com/repo/vendor/example.com/repo2/vendored.go",
+}
 
 func TestMain(m *testing.M) {
 	flag.StringVar(&copyPath, "copy_path", "", "path to copied go_path")
@@ -36,51 +47,44 @@ func TestCopyPath(t *testing.T) {
 	if copyPath == "" {
 		t.Fatal("-copy_path not set")
 	}
-	checkPath(t, copyPath, []fileSpec{
-		{path: "extra.txt"},
-		{path: "src", ty: os.ModeDir},
-		{path: "src/example.com/repo/cmd/bin/bin", ty: absent},
-		{path: "src/example.com/repo/cmd/bin/bin.go"},
-		{path: "src/example.com/repo/pkg/lib/lib.go"},
-		{path: "src/example.com/repo/pkg/lib/data.txt"},
-		// TODO(#1329):
-		// {path: "src/example.com/repo/pkg/lib/internal_test.go"},
-		// {path: "src/example.com/repo/pkg/lib/external_test.go"},
-	})
+	checkPath(t, copyPath, files, os.FileMode(0))
 }
 
-const absent = os.ModeType // all type bits set
-
-type fileSpec struct {
-	path string
-	ty   os.FileMode // 0 indicates a regular file.
-}
-
-func checkPath(t *testing.T, dir string, files []fileSpec) {
+// checkPath checks that dir contains a list of files. files is a list of
+// slash-separated paths relative to dir. Files that start with "-" should be
+// absent. Files that end with "/" should be directories. Other files should
+// be of fileType.
+func checkPath(t *testing.T, dir string, files []string, fileType os.FileMode) {
 	for _, f := range files {
-		path := filepath.Join(dir, filepath.FromSlash(f.path))
+		wantType := fileType
+		wantAbsent := false
+		if strings.HasPrefix(f, "-") {
+			f = f[1:]
+			wantAbsent = true
+		}
+		if strings.HasSuffix(f, "/") {
+			wantType = os.ModeDir
+		}
+		path := filepath.Join(dir, filepath.FromSlash(f))
 		st, err := os.Stat(path)
-		if f.ty == absent {
-			if err == nil {
-				t.Errorf("found %s; should not be present", f.path)
-				continue
-			}
-			if !os.IsNotExist(err) {
+		if wantAbsent {
+			if _, err := os.Stat(path); err == nil {
+				t.Errorf("found %s: should not be present", f)
+			} else if !os.IsNotExist(err) {
 				t.Error(err)
-				continue
 			}
 		} else {
-			if os.IsNotExist(err) {
-				t.Errorf("%s is missing", f.path)
-				continue
-			}
 			if err != nil {
-				t.Error(err)
+				if os.IsNotExist(err) {
+					t.Errorf("%s is missing", f)
+				} else {
+					t.Error(err)
+				}
 				continue
 			}
-			ty := st.Mode() & os.ModeType
-			if ty != f.ty {
-				t.Errorf("%s: got type %s; want type %s", ty, f.ty)
+			gotType := st.Mode() & os.ModeType
+			if gotType != wantType {
+				t.Errorf("%s: got type %s; want type %s", f, gotType, wantType)
 			}
 		}
 	}

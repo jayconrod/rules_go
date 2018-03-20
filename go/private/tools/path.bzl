@@ -32,8 +32,20 @@ load(
 )
 
 def _effective_importpath(archive):
-  # TODO: support vendoring
-  return archive.importpath
+  importpath = archive.importpath
+  importmap = archive.importmap
+  if importpath == "" or importmap == importpath:
+    return importpath
+  parts = importmap.split("/")
+  if "vendor" not in parts:
+    # Unusual case not handled by go build. Just return importpath.
+    return importpath
+  elif len(parts) > 2 and archive.label.workspace_root == "external/" + parts[0]:
+    # Common case for importmap set by Gazelle in external repos.
+    return "/".join(parts[1:])
+  else:
+    # Vendor directory somewhere in the main repo. Leave it alone.
+    return importmap
 
 def _go_path_impl(ctx):
   print("""
