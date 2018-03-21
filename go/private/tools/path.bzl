@@ -138,9 +138,9 @@ go_path = rule(
         "mode": attr.string(
             default = "copy",
             values = [
-                "link",
-                "copy",
                 "archive",
+                "copy",
+                "link",
             ],
         ),
         "_go_path": attr.label(
