@@ -122,17 +122,17 @@ func checkPath(t *testing.T, dir string, files []string, fileType os.FileMode) {
 			wantType = os.ModeDir
 		}
 		path := filepath.Join(dir, filepath.FromSlash(f))
-		st, err := os.Stat(path)
+		st, err := os.Lstat(path)
 		if wantAbsent {
-			if _, err := os.Stat(path); err == nil {
-				t.Errorf("found %s: should not be present", f)
+			if err == nil {
+				t.Errorf("found %s: should not be present", path)
 			} else if !os.IsNotExist(err) {
 				t.Error(err)
 			}
 		} else {
 			if err != nil {
 				if os.IsNotExist(err) {
-					t.Errorf("%s is missing", f)
+					t.Errorf("%s is missing", path)
 				} else {
 					t.Error(err)
 				}
@@ -140,7 +140,7 @@ func checkPath(t *testing.T, dir string, files []string, fileType os.FileMode) {
 			}
 			gotType := st.Mode() & os.ModeType
 			if gotType != wantType {
-				t.Errorf("%s: got type %s; want type %s", f, gotType, wantType)
+				t.Errorf("%s: got type %s; want type %s .. %s", path, gotType, wantType, st.Mode())
 			}
 		}
 	}

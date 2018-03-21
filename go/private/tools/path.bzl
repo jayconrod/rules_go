@@ -99,6 +99,7 @@ Please do not rely on it for production use, but feel free to use it and file is
 
   return [DefaultInfo(
       files = depset(outputs),
+      runfiles = ctx.runfiles(files = outputs),
   )]
   # TODO: GoPath provider?
 

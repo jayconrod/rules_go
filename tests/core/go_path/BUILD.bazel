@@ -22,7 +22,7 @@ go_test(
     args = [
         "-archive_path=$(location :archive_path)",
         "-copy_path=$(location :copy_path)",
-        "-link_path=$(location :link_path/.tag)",
+        "-link_path=tests/core/go_path/link_path", # can't use location; not a single file
     ],
     data = [
         ":archive_path",
