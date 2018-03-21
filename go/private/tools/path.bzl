@@ -48,50 +48,57 @@ Please do not rely on it for production use, but feel free to use it and file is
 
   # Build a map of files to write into the output directory.
   inputs = []
-  manifest_entries = []
+  manifest = {}   # maps destinations to sources
   for archive in as_iterable(archives):
     importpath = _effective_importpath(archive)
     if importpath == "":
       continue
     out_prefix = "src/" + importpath + "/"
     for src in archive.orig_srcs + archive.data_files:
-      inputs.append(src)
-      manifest_entry = struct(src = src.path, dst = out_prefix + src.basename)
-      manifest_entries.append(manifest_entry.to_json())
-    
+      manifest[out_prefix + src.basename] = src
   for src in ctx.files.data:
-    inputs.append(src)
-    manifest_entry = struct(src = src.path, dst = src.basename)
-    manifest_entries.append(manifest_entry.to_json())
+    manifest[src.basename] = src
+  inputs = manifest.values()
 
   # Create a manifest for the builder.
-  manifest = ctx.actions.declare_file(ctx.label.name + "~manifest")
-  inputs.append(manifest)
+  manifest_file = ctx.actions.declare_file(ctx.label.name + "~manifest")
+  inputs.append(manifest_file)
+  manifest_entries = [struct(src = src.path, dst = dst).to_json()
+                      for dst, src in manifest.items()]
   manifest_content = "[\n  " + ",\n  ".join(manifest_entries) + "\n]"
-  ctx.actions.write(manifest, manifest_content)
+  ctx.actions.write(manifest_file, manifest_content)
 
   # Execute the builder
   if ctx.attr.mode == "archive":
     out = ctx.actions.declare_file(ctx.label.name + ".zip")
-  else:
+    out_path = out.path
+    outputs = [out]
+  elif ctx.attr.mode == "copy":
     out = ctx.actions.declare_directory(ctx.label.name)
-  args = [
-      "-manifest=" + manifest.path,
-      "-out=" + out.path,
-      "-mode=" + ctx.attr.mode,
-  ]
-  ctx.actions.run(
-      outputs = [out],
-      inputs = inputs,
-      mnemonic = "GoPath",
-      executable = ctx.executable._go_path,
-      arguments = args,
-  )
+    out_path = out.path
+    outputs = [out]
+  else:  # link
+    outputs = [ctx.actions.declare_file(ctx.label.name + "/" + dst)
+               for dst in manifest]
+    tag = ctx.actions.declare_file(ctx.label.name + "/.tag")
+    outputs.append(tag)
+    out_path = tag.dirname
+  if len(outputs) > 0:
+    args = [
+        "-manifest=" + manifest_file.path,
+        "-out=" + out_path,
+        "-mode=" + ctx.attr.mode,
+    ]
+    ctx.actions.run(
+        outputs = outputs,
+        inputs = inputs,
+        mnemonic = "GoPath",
+        executable = ctx.executable._go_path,
+        arguments = args,
+    )
 
-  runfiles = ctx.runfiles(files = [out])
   return [DefaultInfo(
-      files = depset([out]),
-      runfiles = runfiles,
+      files = depset(outputs),
   )]
   # TODO: GoPath provider?
 

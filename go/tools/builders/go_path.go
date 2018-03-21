@@ -143,15 +143,24 @@ func copyPath(out string, manifest []manifestEntry) error {
 }
 
 func linkPath(out string, manifest []manifestEntry) error {
+	// out directory may already exist and may contain old symlinks. Delete.
+	if err := os.RemoveAll(out); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(out, 0777); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(out, ".tag"), nil, 0666); err != nil {
 		return err
 	}
 	for _, entry := range manifest {
 		dst := filepath.Join(out, filepath.FromSlash(entry.Dst))
-		if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
+		dstDir := filepath.Dir(dst)
+		src, _ := filepath.Rel(dstDir, entry.Src)
+		if err := os.MkdirAll(dstDir, 0777); err != nil {
 			return err
 		}
-		if err := os.Symlink(entry.Src, dst); err != nil {
+		if err := os.Symlink(src, dst); err != nil {
 			return err
 		}
 	}

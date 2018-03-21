@@ -60,7 +60,6 @@ func TestCopyPath(t *testing.T) {
 }
 
 func TestLinkPath(t *testing.T) {
-	t.Skip()
 	if linkPath == "" {
 		t.Fatal("-link_path not set")
 	}

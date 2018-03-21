@@ -14,7 +14,7 @@ test_suite(name = "go_path")
     data = ["extra.txt"],
     mode = mode,
     testonly = True,
-) for mode in ("copy", "archive")]
+) for mode in ("archive", "copy", "link")]
 
 go_test(
     name = "go_default_test",
@@ -22,11 +22,12 @@ go_test(
     args = [
         "-archive_path=$(location :archive_path)",
         "-copy_path=$(location :copy_path)",
-        # TODO: -link_path. symlinks outside tree artifacts are not allowed.
+        "-link_path=$(location :link_path/.tag)",
     ],
     data = [
         ":archive_path",
-        ":copy_path"
+        ":copy_path",
+        ":link_path",
     ],
     rundir = ".",
 )
