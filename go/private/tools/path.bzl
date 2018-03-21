@@ -26,6 +26,7 @@ load(
 load(
     "@io_bazel_rules_go//go/private:common.bzl",
     "as_iterable",
+    "as_list",
 )
 load(
     "@io_bazel_rules_go//go/private:rules/rule.bzl",
@@ -33,75 +34,98 @@ load(
 )
 
 def _go_path_impl(ctx):
-  print("""
-EXPERIMENTAL: the go_path rule is still very experimental
-Please do not rely on it for production use, but feel free to use it and file issues
-""")
-  # Gather all packages.
+  # Gather all archives. Note that there may be multiple packages with the same
+  # importpath (e.g., multiple vendored libraries, internal tests).
   direct_archives = []
   transitive_archives = []
   for dep in ctx.attr.deps:
     archive = get_archive(dep)
     direct_archives.append(archive.data)
+
     transitive_archives.append(archive.transitive)
   archives = depset(direct = direct_archives, transitive = transitive_archives)
 
-  # Build a map of files to write into the output directory.
-  inputs = []
-  manifest = {}   # maps destinations to sources
+  # Collect sources and data files from archives. Merge archives into packages.
+  pkg_map = {}  # map from package path to structs
   for archive in as_iterable(archives):
-    importpath = _effective_importpath(archive)
+    importpath, pkgpath = _get_importpath_pkgpath(archive)
     if importpath == "":
-      continue
-    out_prefix = "src/" + importpath + "/"
-    for src in archive.orig_srcs + archive.data_files:
-      manifest[out_prefix + src.basename] = src
-  for src in ctx.files.data:
-    manifest[src.basename] = src
-  inputs = manifest.values()
+      continue  # synthetic archive or inferred location
+    out_prefix = "src/" + pkgpath
+    pkg = struct(
+        importpath = importpath,
+        dir = out_prefix,
+        srcs = as_list(archive.orig_srcs),
+        data = as_list(archive.data_files),
+    )
+    if pkgpath in pkg_map:
+      _merge_pkg(pkg_map[pkgpath], pkg)
+    else:
+      pkg_map[pkgpath] = pkg
 
-  # Create a manifest for the builder.
+  # Build a manifest file that includes all files to copy/link/zip.
+  inputs = []
+  manifest_entries = []
+  for pkg in pkg_map.values():
+    for f in pkg.srcs + pkg.data:
+      manifest_entries.append(struct(
+          src = f.path,
+          dst = pkg.dir + "/" + f.basename,
+      ))
+      inputs.append(f)
+  for f in ctx.files.data:
+    manifest_entries.append(struct(
+        src = f.path,
+        dst = f.basename,
+    ))
+    inputs.append(f)
   manifest_file = ctx.actions.declare_file(ctx.label.name + "~manifest")
-  inputs.append(manifest_file)
-  manifest_entries = [struct(src = src.path, dst = dst).to_json()
-                      for dst, src in manifest.items()]
-  manifest_content = "[\n  " + ",\n  ".join(manifest_entries) + "\n]"
+  manifest_entries_json = [e.to_json() for e in manifest_entries]
+  manifest_content = "[\n  " + ",\n  ".join(manifest_entries_json) + "\n]"
   ctx.actions.write(manifest_file, manifest_content)
+  inputs.append(manifest_file)
 
   # Execute the builder
   if ctx.attr.mode == "archive":
     out = ctx.actions.declare_file(ctx.label.name + ".zip")
     out_path = out.path
+    out_short_path = out.short_path
     outputs = [out]
   elif ctx.attr.mode == "copy":
     out = ctx.actions.declare_directory(ctx.label.name)
     out_path = out.path
+    out_short_path = out.short_path
     outputs = [out]
   else:  # link
-    outputs = [ctx.actions.declare_file(ctx.label.name + "/" + dst)
-               for dst in manifest]
+    outputs = [ctx.actions.declare_file(ctx.label.name + "/" + e.dst)
+               for e in manifest_entries]
     tag = ctx.actions.declare_file(ctx.label.name + "/.tag")
-    outputs.append(tag)
+    ctx.actions.write(tag, "")
     out_path = tag.dirname
-  if len(outputs) > 0:
-    args = [
-        "-manifest=" + manifest_file.path,
-        "-out=" + out_path,
-        "-mode=" + ctx.attr.mode,
-    ]
-    ctx.actions.run(
-        outputs = outputs,
-        inputs = inputs,
-        mnemonic = "GoPath",
-        executable = ctx.executable._go_path,
-        arguments = args,
-    )
+    out_short_path, _, _ = tag.short_path.rpartition("/")
+  args = [
+      "-manifest=" + manifest_file.path,
+      "-out=" + out_path,
+      "-mode=" + ctx.attr.mode,
+  ]
+  ctx.actions.run(
+      outputs = outputs,
+      inputs = inputs,
+      mnemonic = "GoPath",
+      executable = ctx.executable._go_path,
+      arguments = args,
+  )
 
-  return [DefaultInfo(
-      files = depset(outputs),
-      runfiles = ctx.runfiles(files = outputs),
-  )]
-  # TODO: GoPath provider?
+  return [
+      DefaultInfo(
+          files = depset(outputs),
+          runfiles = ctx.runfiles(files = outputs),
+      ),
+      GoPath(
+          gopath = out_short_path,
+          packages = pkg_map.values(),
+      ),
+  ]
 
 go_path = rule(
     _go_path_impl,
@@ -127,9 +151,9 @@ go_path = rule(
     },
 )
 
-def _effective_importpath(archive):
+def _get_importpath_pkgpath(archive):
   if archive.pathtype != EXPLICIT_PATH:
-    return ""
+    return "", ""
   importpath = archive.importpath
   importmap = archive.importmap
   if importpath.endswith("_test"): importpath = importpath[:-len("_test")]
@@ -137,10 +161,18 @@ def _effective_importpath(archive):
   parts = importmap.split("/")
   if "vendor" not in parts:
     # Unusual case not handled by go build. Just return importpath.
-    return importpath
+    return importpath, importpath
   elif len(parts) > 2 and archive.label.workspace_root == "external/" + parts[0]:
     # Common case for importmap set by Gazelle in external repos.
-    return "/".join(parts[1:])
+    return importpath, "/".join(parts[1:])
   else:
     # Vendor directory somewhere in the main repo. Leave it alone.
-    return importmap
+    return importpath, importmap
+
+def _merge_pkg(x, y):
+  x_srcs = {f.path: None for f in x.srcs}
+  x_data = {f.path: None for f in x.data}
+  x.srcs.extend([f for f in y.srcs if f.path not in x_srcs])
+  x.data.extend([f for f in y.data if f.path not in x_srcs])
+
+  
