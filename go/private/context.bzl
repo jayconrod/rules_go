@@ -202,6 +202,16 @@ def _get_go_binary(context_data):
     return sdk, f
   fail("Could not find go executable in go_sdk")
 
+def _choose_stdlib(mode, default, sdk_stdlibs):
+  for stdlib in sdk_stdlibs:
+    stdlib = get_source(stdlib).stdlib
+    if (mode.goos == stdlib.mode.goos and
+        mode.goarch == stdlib.mode.goarch and
+        mode.race == stdlib.mode.race and
+        mode.link == stdlib.mode.link):
+      return stdlib
+  return get_source(default).stdlib if default != None else None
+
 def go_context(ctx, attr=None):
   toolchain = ctx.toolchains["@io_bazel_rules_go//go:toolchain"]
 
@@ -223,12 +233,8 @@ def go_context(ctx, attr=None):
   mode = get_mode(ctx, host_only, toolchain, context_data)
   root, binary = _get_go_binary(context_data)
 
-  stdlib = getattr(attr, "_stdlib", None)
-  if stdlib:
-    stdlib = get_source(stdlib).stdlib
-    goroot = stdlib.root_file.dirname
-  else:
-    goroot = root
+  stdlib = _choose_stdlib(mode, getattr(attr, "_stdlib", None), getattr(attr, "_sdk_stdlibs", []))
+  goroot = stdlib.root_file.dirname if stdlib else root
 
   env = dict(context_data.env)
   env.update({

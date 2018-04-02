@@ -18,7 +18,7 @@ load(
 )
 
 _ASPECT_ATTRS = ["pure", "static", "msan", "race"]
-_BOOTSTRAP_ATTRS = ["_builders", "_coverdata", "_stdlib"]
+_BOOTSTRAP_ATTRS = ["_builders", "_coverdata", "_sdk_stdlibs", "_stdlib"]
 
 def go_rule(implementation, attrs={}, toolchains=[], bootstrap=False, bootstrap_attrs=_BOOTSTRAP_ATTRS, **kwargs):
   if bootstrap:
@@ -35,6 +35,8 @@ def go_rule(implementation, attrs={}, toolchains=[], bootstrap=False, bootstrap_
     attrs["_builders"] = attr.label(default = Label("@io_bazel_rules_go//:builders"))
   if "_coverdata" in bootstrap_attrs:
     attrs["_coverdata"] = attr.label(default = Label("@io_bazel_rules_go//go/tools/coverdata"), aspects = aspects)
+  if "_std_stdlibs" in bootstrap_attrs:
+    attrs["_sdk_stdlibs"] = attr.label(default = ["@go_sdk//:linux_amd64"])
   if "_stdlib" in bootstrap_attrs:
     attrs["_stdlib"] = attr.label(default = Label("@io_bazel_rules_go//:stdlib"), aspects = aspects)
 

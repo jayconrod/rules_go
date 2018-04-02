@@ -27,6 +27,13 @@ load(
 load(
     "@io_bazel_rules_go//go/private:mode.bzl",
     "LINKMODE_C_SHARED",
+    "LINKMODE_NORMAL",
+    "LINKMODES",
+)
+load(
+    "@io_bazel_rules_go//go/platform:list.bzl",
+    "GOARCH",
+    "GOOS",
 )
 
 def _stdlib_library_to_source(go, attr, source, merge):
@@ -84,6 +91,68 @@ stdlib = go_rule(
             executable = True,
             cfg = "host",
             default = Label("@io_bazel_rules_go//go/tools/builders:filter_buildid"),
+        ),
+    },
+)
+
+def _dist_stdlib_library_to_source(go, attr, source, merge):
+  root_file = go._ctx.file.root
+  libs = go._ctx.files.libs
+  headers = go._ctx.files.headers
+  tools = go._ctx.files.tools
+  files = [root_file, go.go] + libs + headers + tools
+  source["stdlib"] = GoStdLib(
+      root_file = root_file,
+      mode = go.mode,
+      libs = libs,
+      headers = headers,
+      files = files,
+  )
+
+def _dist_stdlib_impl(ctx):
+  go = go_context(ctx)
+  library = go.new_library(go, resolver = _dist_stdlib_library_to_source)
+  source = go.library_to_source(go, ctx.attr, library, False)
+  return [source, library]
+
+dist_stdlib = go_rule(
+    _dist_stdlib_impl,
+    bootstrap = True,
+    attrs = {
+        "root": attr.label(
+            allow_single_file = True,
+            mandatory = True,
+        ),
+        "headers": attr.label_list(
+            allow_files = [".h"],
+            mandatory = True,
+        ),
+        "libs": attr.label_list(
+            allow_files = [".a"],
+            mandatory = True,
+        ),
+        "tools": attr.label_list(
+            allow_files = True,
+            mandatory = True,
+        ),
+        "race": attr.string(
+            values = [
+                "on",
+                "off",
+            ],
+            default = "off",
+        ),
+        "goos": attr.string(
+            values = GOOS.keys(),
+            mandatory = True,
+        ),
+        "goarch": attr.string(
+            values = GOARCH.keys(),
+            mandatory = True,
+        ),
+        "linkmode": attr.string(
+            values = LINKMODES,
+            default = LINKMODE_NORMAL,
         ),
     },
 )

@@ -1,3 +1,5 @@
+load("@io_bazel_rules_go//go/private:rules/stdlib.bzl", "dist_stdlib")
+
 package(default_visibility = [ "//visibility:public" ])
 
 filegroup(
@@ -16,5 +18,19 @@ filegroup(
     "//conditions:default": None,
   }),
 )
+
+dist_stdlib(
+    name = "linux_amd64",
+    root = ":ROOT",
+    headers = glob(["pkg/include/**/*.h"]),
+    libs = glob(["pkg/linux_amd64/**/*.a"]),
+    tools = glob(["pkg/tool/**"]),
+    goos = "linux",
+    goarch = "amd64",
+)
+
+DIST_STDLIBS = [
+    "@go_sdk//:linux_amd64",
+]
 
 exports_files(["packages.txt"])

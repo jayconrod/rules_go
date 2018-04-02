@@ -14,6 +14,8 @@
 
 # Modes are documented in go/modes.rst#compilation-modes
 
+load("@io_bazel_rules_go//go/platform:list.bzl", "GOOS_GOARCH")
+
 LINKMODE_NORMAL = "normal"
 
 LINKMODE_SHARED = "shared"
@@ -115,3 +117,31 @@ def get_mode(ctx, host_only, go_toolchain, go_context_data):
       goos = goos,
       goarch = goarch,
   )
+
+def stdlib_mode_to_go_mode(stdlib_mode):
+  parts = stdlib_mode.split("_")
+  if len(parts) < 2:
+    return None
+  goos, goarch = parts[0], parts[1]
+  parts = parts[2:]
+  if (goos, goarch) not in GOOS_GOARCH:
+    return None
+  mode = {
+    "static": True,
+    "race": False,
+    "msan": False,
+    "pure": False,
+    "link": LINKMODE_NORMAL,
+    "debug": False,
+    "strip": False,
+    "goos": goos,
+    "goarch": goarch,
+  }
+  for part in parts:
+    if part == "race":
+      mode["race"] = True
+    elif part == "shared":
+      mode["link"] = LINKMODE_SHARED
+    else:
+      return None  # unknown part
+  return struct(**mode)

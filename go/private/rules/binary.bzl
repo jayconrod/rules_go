@@ -167,6 +167,7 @@ go_tool_binary = go_rule(
         "x_defs": attr.string_dict(),
         "linkmode": attr.string(values=LINKMODES, default=LINKMODE_NORMAL),
         "out": attr.string(),
+        "_sdk_stdlibs": attr.label_list(default = ["@go_sdk//:linux_amd64"]),
         "_hostonly": attr.bool(default=True),
     },
     executable = True,
