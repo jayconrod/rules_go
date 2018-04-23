@@ -3,6 +3,10 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_test(
     name = "objc_test",
     srcs = ["objc_darwin_test.go"],
+    embed = select({
+        "@io_bazel_rules_go//go/platform:darwin": [":objc"],
+        "//conditions:default": [],
+    }),
 )
 
 go_library(
