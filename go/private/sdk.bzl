@@ -71,6 +71,41 @@ go_local_sdk = repository_rule(
 )
 
 def _prepare(ctx):
+  build_tpl_path = ctx.path(Label("@io_bazel_rules_go//go/private:BUILD.sdk.bazel"))
+
+  # Create ROOT file. Used as a reference point for SDK stdlibs.
+  ctx.file("ROOT", "")
+
+  # Create packages.txt, a list of all the standard packages. Used by Gazelle
+  # and other tools.
+  go_files = []
+  src = ctx.path("src")
+  _collect_go_files(ctx.path("src"), go_files)
+  prefix = str(src) + "/"
+  packages = [f.dirname[len(prefix):] for f in go_files]
+  packages = sorted({p: None for p in packages}.keys())
+  ctx.write("packages.txt", "\n".join(packages))
+
+  # Create BUILD.bazel. We need to make a list of stdlibs in the pkg directory.
+  stdlib_rules = []
+  for f in ctx.path("pkg"):
+    if f.basename in ("tool", "include"):
+      continue
+    stdlib_rule = """sdk_stdlib(
+    name = "{name}",
+    headers = ":headers",
+    libs = glob(
+        ["pkg/{name}/**/*.a"],
+        excludes = [
+            "pkg/{name}/cmd/**",
+            "pkg/{name}/vendor/**",
+        ],
+    ),
+    tools = ":tools",
+    mode = "{name}",
+)""".format(name = f.basename)
+  ctx.template("BUILD.bazel", 
+
   # Create a text file with a list of standard packages.
   # OPT: just list directories under src instead of running "go list". No
   # need to read all source files. We need a portable way to run code though.
@@ -82,6 +117,30 @@ def _prepare(ctx):
     print(result.stderr)
     fail("failed to list standard packages")
   ctx.file("packages.txt", result.stdout)
+
+# Hack around lack of recursion in Skylark with multiple functions. We
+# don't need to go very deep.
+def _collect_go_files1(path, go_files):
+  for f in path.readdir():
+    _, _, ext = f.basename.rpartition(".")
+    if ext == ".go":
+      go_files.append(f)
+    elif ext == f.basename:
+      _collect_go_files2(f, go_files)
+      
+def _collect_go_files2(path, go_files):
+  for f in path.readdir():
+    if f.basename in ("cmd", "internal", "vendor"):
+      continue
+    if f.basename.endswith(".go"):
+      go_files.append(f)
+    elif f.basename.find(".") < 0:
+      _collect_go_files2(f, go_files)
+
+def _collect_go_files3(path, go_files):
+  for f in path.readdir():
+    if f.basename.endswith(".go"):
+      go_files.append(f)
 
 def _remote_sdk(ctx, urls, strip_prefix, sha256):
   ctx.download_and_extract(

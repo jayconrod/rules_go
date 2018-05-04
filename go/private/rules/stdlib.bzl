@@ -69,6 +69,7 @@ def _stdlib_library_to_source(go, attr, source, merge):
       mode = go.mode,
       libs = [pkg],
       headers = [pkg],
+      tools = [pkg],
       files = files,
   )
 
@@ -95,7 +96,7 @@ stdlib = go_rule(
     },
 )
 
-def _dist_stdlib_library_to_source(go, attr, source, merge):
+def _sdk_stdlib_library_to_source(go, attr, source, merge):
   root_file = go._ctx.file.root
   libs = go._ctx.files.libs
   headers = go._ctx.files.headers
@@ -109,14 +110,14 @@ def _dist_stdlib_library_to_source(go, attr, source, merge):
       files = files,
   )
 
-def _dist_stdlib_impl(ctx):
+def _sdk_stdlib_impl(ctx):
   go = go_context(ctx)
-  library = go.new_library(go, resolver = _dist_stdlib_library_to_source)
+  library = go.new_library(go, resolver = _sdk_stdlib_library_to_source)
   source = go.library_to_source(go, ctx.attr, library, False)
   return [source, library]
 
-dist_stdlib = go_rule(
-    _dist_stdlib_impl,
+sdk_stdlib = go_rule(
+    _sdk_stdlib_impl,
     bootstrap = True,
     attrs = {
         "root": attr.label(

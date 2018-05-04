@@ -70,6 +70,7 @@ go_tool_library = go_rule(
     bootstrap_attrs = [
         "_builders",
         "_stdlib",
+        "_sdk_stdlibs",
     ],
     attrs = {
         "data": attr.label_list(
