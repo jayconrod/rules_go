@@ -48,7 +48,7 @@ def emit_compile(go,
 
   inputs = (sources + [go.package_list] +
             [archive.data.file for archive in archives] +
-            go.stdlib.libs + go.stdlib.headers + go.stdlib.files)
+            go.stdlib.libs)
 
   builder_args = go.args(go)
   builder_args.add(sources, before_each="-src")
@@ -93,7 +93,7 @@ def _bootstrap_compile(go, sources, out_lib, gc_goopts):
   args.extend(gc_goopts)
   args.extend([s.path for s in sources])
   go.actions.run_shell(
-      inputs = sources + go.sdk_files + go.sdk_tools,
+      inputs = sources + [go.go] + go.sdk_tools + go.stdlib.libs,
       outputs = [out_lib],
       mnemonic = "GoCompile",
       command = "export GOROOT=$(pwd)/{} && export GOROOT_FINAL=GOROOT && {} {}".format(go.root, go.go.path, " ".join(args)),

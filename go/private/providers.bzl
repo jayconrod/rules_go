@@ -50,6 +50,8 @@ GoPath = provider()
 
 GoStdLib = provider()
 
+GoStdLibSet = provider()
+
 GoBuilders = provider()
 
 EXPLICIT_PATH = "explicit"

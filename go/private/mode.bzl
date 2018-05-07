@@ -118,6 +118,14 @@ def get_mode(ctx, host_only, go_toolchain, go_context_data):
       goarch = goarch,
   )
 
+def go_mode_to_stdlib_mode(mode):
+  parts = [mode.goos, mode.goarch]
+  if mode.race:
+    parts.append("race")
+  if mode.link in (LINKMODE_SHARED, LINKMODE_C_SHARED, LINKMODE_C_ARCHIVE):
+    parts.append("shared")
+  return "_".join(parts)
+
 def stdlib_mode_to_go_mode(stdlib_mode):
   parts = stdlib_mode.split("_")
   if len(parts) < 2:

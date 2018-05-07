@@ -14,9 +14,60 @@
 
 load("@io_bazel_rules_go//go/private:common.bzl", "env_execute", "executable_extension")
 
+_SDK_BUILD_TPL = """
+load("@io_bazel_rules_go//go/private:rules/stdlib.bzl", "sdk_stdlib", "sdk_stdlib_set")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "go",
+    srcs = glob(["bin/go", "bin/go.exe"]),
+)
+
+filegroup(
+    name = "headers",
+    srcs = glob(["pkg/include/**/*.h"]),
+)
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["src/**"]),
+)
+
+filegroup(
+    name = "tools",
+    srcs = glob(["pkg/tool/**"]),
+)
+
+{stdlib_rules}
+
+sdk_stdlib_set(
+    name = "stdlibs",
+    deps = [
+        {stdlib_names},
+    ],
+)
+
+exports_files(["ROOT", "packages.txt"])
+"""
+
+_SDK_STDLIB_TPL = """sdk_stdlib(
+    name = "{name}",
+    root = "ROOT",
+    headers = [":headers"],
+    libs = glob(
+        ["pkg/{name}/**/*.a"],
+        exclude = [
+            "pkg/{name}/cmd/**",
+            "pkg/{name}/vendor/**",
+        ],
+    ),
+    tools = [":tools"],
+    mode = "{name}",
+)"""
+
 def _go_host_sdk_impl(ctx):
   path = _detect_host_sdk(ctx)
-  _sdk_build_file(ctx)
   _local_sdk(ctx, path)
   _prepare(ctx)
 
@@ -45,7 +96,6 @@ def _go_download_sdk_impl(ctx):
   sdks = ctx.attr.sdks
   if host not in sdks: fail("Unsupported host {}".format(host))
   filename, sha256 = ctx.attr.sdks[host]
-  _sdk_build_file(ctx)
   _remote_sdk(ctx, [url.format(filename) for url in ctx.attr.urls], ctx.attr.strip_prefix, sha256)
   _prepare(ctx)
 
@@ -59,7 +109,6 @@ go_download_sdk = repository_rule(
 )
 
 def _go_local_sdk_impl(ctx):
-  _sdk_build_file(ctx)
   _local_sdk(ctx, ctx.attr.path)
   _prepare(ctx)
 
@@ -71,7 +120,8 @@ go_local_sdk = repository_rule(
 )
 
 def _prepare(ctx):
-  build_tpl_path = ctx.path(Label("@io_bazel_rules_go//go/private:BUILD.sdk.bazel"))
+  result = ctx.execute(["date"])
+  ctx.file("begin", result.stdout)
 
   # Create ROOT file. Used as a reference point for SDK stdlibs.
   ctx.file("ROOT", "")
@@ -80,65 +130,67 @@ def _prepare(ctx):
   # and other tools.
   go_files = []
   src = ctx.path("src")
-  _collect_go_files(ctx.path("src"), go_files)
+  _collect_go_files1(ctx.path("src"), go_files)
   prefix = str(src) + "/"
-  packages = [f.dirname[len(prefix):] for f in go_files]
+  packages = [str(f.dirname)[len(prefix):] for f in go_files]
   packages = sorted({p: None for p in packages}.keys())
-  ctx.write("packages.txt", "\n".join(packages))
+  ctx.file("packages.txt", "\n".join(packages))
 
   # Create BUILD.bazel. We need to make a list of stdlibs in the pkg directory.
+  stdlib_names = []
   stdlib_rules = []
-  for f in ctx.path("pkg"):
-    if f.basename in ("tool", "include"):
+  for f in ctx.path("pkg").readdir():
+    if f.basename.count("_") != 1:
+      # Discard tool, include, and anything other than goos_goarch.
+      # TODO(jayconrod): support _race, _shared, and others.
       continue
-    stdlib_rule = """sdk_stdlib(
-    name = "{name}",
-    headers = ":headers",
-    libs = glob(
-        ["pkg/{name}/**/*.a"],
-        excludes = [
-            "pkg/{name}/cmd/**",
-            "pkg/{name}/vendor/**",
-        ],
-    ),
-    tools = ":tools",
-    mode = "{name}",
-)""".format(name = f.basename)
-  ctx.template("BUILD.bazel", 
+    stdlib_names.append(f.basename)
+    stdlib_rules.append(_SDK_STDLIB_TPL.format(name = f.basename))
 
-  # Create a text file with a list of standard packages.
-  # OPT: just list directories under src instead of running "go list". No
-  # need to read all source files. We need a portable way to run code though.
-  result = env_execute(ctx,
-     arguments = ["bin/go"+executable_extension(ctx), "list", "..."],
-     environment = {"GOROOT": str(ctx.path("."))},
+  build_content = _SDK_BUILD_TPL.format(
+      stdlib_rules = "\n\n".join(stdlib_rules),
+      stdlib_names = ",\n        ".join(['":{}"'.format(s) for s in stdlib_names]),
   )
-  if result.return_code != 0:
-    print(result.stderr)
-    fail("failed to list standard packages")
-  ctx.file("packages.txt", result.stdout)
+  ctx.file("BUILD.bazel", build_content)
+
+  result = ctx.execute(["date"])
+  ctx.file("end", result.stdout)
 
 # Hack around lack of recursion in Skylark with multiple functions. We
 # don't need to go very deep.
+_COLLECT_IGNORE = ("cmd", "internal", "vendor", "Makefile", "testdata", "README")
+
 def _collect_go_files1(path, go_files):
   for f in path.readdir():
-    _, _, ext = f.basename.rpartition(".")
-    if ext == ".go":
-      go_files.append(f)
-    elif ext == f.basename:
-      _collect_go_files2(f, go_files)
-      
-def _collect_go_files2(path, go_files):
-  for f in path.readdir():
-    if f.basename in ("cmd", "internal", "vendor"):
+    if f.basename in _COLLECT_IGNORE:
       continue
     if f.basename.endswith(".go"):
       go_files.append(f)
     elif f.basename.find(".") < 0:
       _collect_go_files2(f, go_files)
 
+def _collect_go_files2(path, go_files):
+  for f in path.readdir():
+    if f.basename in _COLLECT_IGNORE:
+      continue
+    if f.basename.endswith(".go"):
+      go_files.append(f)
+    elif f.basename.find(".") < 0:
+      _collect_go_files3(f, go_files)
+
 def _collect_go_files3(path, go_files):
   for f in path.readdir():
+    if f.basename in _COLLECT_IGNORE:
+      continue
+    if f.basename.endswith(".go"):
+      go_files.append(f)
+    elif f.basename.find(".") < 0:
+      _collect_go_files4(f, go_files)
+
+def _collect_go_files4(path, go_files):
+  for f in path.readdir():
+    if f.basename in _COLLECT_IGNORE:
+      continue
     if f.basename.endswith(".go"):
       go_files.append(f)
 
@@ -152,13 +204,6 @@ def _remote_sdk(ctx, urls, strip_prefix, sha256):
 def _local_sdk(ctx, path):
   for entry in ["src", "pkg", "bin"]:
     ctx.symlink(path+"/"+entry, entry)
-
-def _sdk_build_file(ctx):
-  ctx.file("ROOT")
-  ctx.template("BUILD.bazel",
-      Label("@io_bazel_rules_go//go/private:BUILD.sdk.bazel"),
-      executable = False,
-  )
 
 def _detect_host_sdk(ctx):
   root = "@invalid@"

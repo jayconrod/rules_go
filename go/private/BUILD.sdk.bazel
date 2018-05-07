@@ -12,6 +12,6 @@ filegroup(
     srcs = glob(["pkg/tool/**"]),
 )
 
-{{stdlibs}}
+{stdlibs}
 
 exports_files(["ROOT", "packages.txt"])

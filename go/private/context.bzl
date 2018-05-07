@@ -21,6 +21,7 @@ load(
     "GoSource",
     "GoAspectProviders",
     "GoStdLib",
+    "GoStdLibSet",
     "GoBuilders",
     "get_archive",
     "get_source",
@@ -33,6 +34,7 @@ load(
     "@io_bazel_rules_go//go/private:mode.bzl",
     "get_mode",
     "mode_string",
+    "stdlib_mode_to_go_mode",
 )
 load(
     "@io_bazel_rules_go//go/private:common.bzl",
@@ -188,29 +190,15 @@ def _infer_importpath(ctx):
     path = path[1:]
   return path, INFERRED_PATH
 
-def _get_go_binary(context_data):
-  for f in context_data.sdk_files:
-    parent = paths.dirname(f.path)
-    sdk = paths.dirname(parent)
-    parent = paths.basename(parent)
-    if parent != "bin":
-      continue
-    basename = paths.basename(f.path)
-    name, ext = paths.split_extension(basename)
-    if name != "go":
-      continue
-    return sdk, f
-  fail("Could not find go executable in go_sdk")
-
 def _choose_stdlib(mode, default, sdk_stdlibs):
   for stdlib in sdk_stdlibs:
-    stdlib = get_source(stdlib).stdlib
-    if (mode.goos == stdlib.mode.goos and
-        mode.goarch == stdlib.mode.goarch and
-        mode.race == stdlib.mode.race and
-        mode.link == stdlib.mode.link):
+    sdk_mode = stdlib_mode_to_go_mode(stdlib.mode)
+    if (mode.goos == sdk_mode.goos and
+        mode.goarch == sdk_mode.goarch and
+        mode.race == sdk_mode.race and
+        mode.link == sdk_mode.link):
       return stdlib
-  return get_source(default).stdlib if default != None else None
+  return default
 
 def go_context(ctx, attr=None):
   toolchain = ctx.toolchains["@io_bazel_rules_go//go:toolchain"]
@@ -231,16 +219,15 @@ def go_context(ctx, attr=None):
 
   context_data = attr._go_context_data
   mode = get_mode(ctx, host_only, toolchain, context_data)
-  root, binary = _get_go_binary(context_data)
 
-  stdlib = _choose_stdlib(mode, getattr(attr, "_stdlib", None), getattr(attr, "_sdk_stdlibs", []))
-  goroot = stdlib.root_file.dirname if stdlib else root
+  stdlib = _choose_stdlib(mode, getattr(attr, "_stdlib", None), context_data.sdk_stdlibs)
+  root = stdlib.root.dirname if stdlib else context_data.go_binary.root
 
   env = dict(context_data.env)
   env.update({
       "GOARCH": mode.goarch,
       "GOOS": mode.goos,
-      "GOROOT": goroot,
+      "GOROOT": root,
       "GOROOT_FINAL": "GOROOT",
       "CGO_ENABLED": "0" if mode.pure else "1",
       "PATH": context_data.cgo_tools.compiler_path,
@@ -252,9 +239,8 @@ def go_context(ctx, attr=None):
       toolchain = toolchain,
       mode = mode,
       root = root,
-      go = binary,
+      go = context_data.go_binary,
       stdlib = stdlib,
-      sdk_files = context_data.sdk_files,
       sdk_tools = context_data.sdk_tools,
       actions = ctx.actions,
       exe_extension = goos_to_extension(mode.goos),
@@ -290,7 +276,7 @@ def go_context(ctx, attr=None):
       _ctx = ctx, # TODO: All uses of this should be removed
   )
 
-def _go_context_data(ctx):
+def _go_context_data_impl(ctx):
   cpp = ctx.fragments.cpp
   features = ctx.features
   compiler_options = _filter_options(
@@ -310,8 +296,10 @@ def _go_context_data(ctx):
       strip = ctx.attr.strip,
       crosstool = ctx.files._crosstool,
       package_list = ctx.file._package_list,
-      sdk_files = ctx.files._sdk_files,
+      go_binary = ctx.file._go_binary,
+      sdk_root = ctx.file._sdk_root,
       sdk_tools = ctx.files._sdk_tools,
+      sdk_stdlibs = ctx.attr._sdk_stdlibs[GoStdLibSet].stdlibs,
       tags = tags,
       env = env,
       cgo_tools = struct(
@@ -326,7 +314,7 @@ def _go_context_data(ctx):
   )
 
 go_context_data = rule(
-    _go_context_data,
+    _go_context_data_impl,
     attrs = {
         "strip": attr.string(mandatory = True),
         # Hidden internal attributes
@@ -336,14 +324,28 @@ go_context_data = rule(
             single_file = True,
             default = "@go_sdk//:packages.txt",
         ),
-        "_sdk_files": attr.label(
+        "_go_binary": attr.label(
+            allow_single_file = True,
+            cfg = "host",
+            default = "@go_sdk//:go",
+        ),
+        "_sdk_root": attr.label(
+            allow_single_file = True,
+            cfg = "data",
+            default = "@go_sdk//:ROOT",
+        ),
+        "_sdk_headers": attr.label(
             allow_files = True,
-            default="@go_sdk//:files",
+            cfg="host",
+            default="@go_sdk//:headers",
         ),
         "_sdk_tools": attr.label(
             allow_files = True,
-            cfg="host",
             default="@go_sdk//:tools",
+        ),
+        "_sdk_stdlibs": attr.label(
+            providers = [GoStdLibSet],
+            default = "@go_sdk//:stdlibs",
         ),
         "_xcode_config": attr.label(
             default = Label("@bazel_tools//tools/osx:current_xcode_config"),

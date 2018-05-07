@@ -15,6 +15,7 @@
 load(
     "@io_bazel_rules_go//go/private:providers.bzl",
     "GoStdLib",
+    "GoStdLibSet",
 )
 load(
     "@io_bazel_rules_go//go/private:context.bzl",
@@ -27,28 +28,28 @@ load(
 load(
     "@io_bazel_rules_go//go/private:mode.bzl",
     "LINKMODE_C_SHARED",
-    "LINKMODE_NORMAL",
-    "LINKMODES",
-)
-load(
-    "@io_bazel_rules_go//go/platform:list.bzl",
-    "GOARCH",
-    "GOOS",
+    "go_mode_to_stdlib_mode",
 )
 
-def _stdlib_library_to_source(go, attr, source, merge):
-  pkg = go.declare_directory(go, "pkg")
+def _stdlib_impl(ctx):
+  go = go_context(ctx)
+  stdlib_mode = go_mode_to_stdlib_mode(go.mode)
+
   root_file = go.declare_file(go, "ROOT")
-  filter_buildid = attr._filter_buildid_builder.files.to_list()[0]
-  files = [root_file, go.go, pkg]
+  src_dir = go.declare_directory(go, "src")
+  libs_dir = go.declare_directory(go, "pkg/" + stdlib_mode)
+  tools_dir = go.declare_directory(go, "pkg/tools")
+  headers_dir = go.declare_directory(go, "pkg/headers")
+  
+  go.actions.write(root_file, "")
+
   args = go.args(go)
   args.add(["-out", root_file.dirname])
   if go.mode.race:
     args.add("-race")
-  if go.mode.link == LINKMODE_C_SHARED:
+  if go.mode == LINKMODE_C_SHARED:
     args.add("-shared")
-  args.add(["-filter_buildid", filter_buildid.path])
-  go.actions.write(root_file, "")
+  args.add(["-filter_buildid", ctx.executable._filter_buildid_builder.path])
   env = go.env
   env.update({
       "CC": go.cgo_tools.compiler_executable,
@@ -56,28 +57,29 @@ def _stdlib_library_to_source(go, attr, source, merge):
       "CGO_CFLAGS": " ".join(go.cgo_tools.c_options),
       "CGO_LDFLAGS": " ".join(go.cgo_tools.linker_options),
   })
+  inputs = (go.crosstool + [go.go] + go.sdk_tools +
+            ctx.files._sdk_headers + ctx.files._sdk_srcs +
+            [ctx.executable._filter_buildid_builder])
+  outputs = [src_dir, libs_dir, tools_dir, headers_dir]
   go.actions.run(
-      inputs = go.sdk_files + go.sdk_tools + go.crosstool + [filter_buildid, go.package_list, root_file],
-      outputs = [pkg],
-      mnemonic = "GoStdlib",
-      executable = attr._stdlib_builder.files.to_list()[0],
+      inputs = inputs,
+      outputs = outputs,
+      mnemonic = "GoStdLib",
+      executable = ctx.executable._stdlib_builder,
       arguments = [args],
       env = env,
   )
-  source["stdlib"] = GoStdLib(
-      root_file = root_file,
-      mode = go.mode,
-      libs = [pkg],
-      headers = [pkg],
-      tools = [pkg],
-      files = files,
-  )
 
-def _stdlib_impl(ctx):
-  go = go_context(ctx)
-  library = go.new_library(go, resolver = _stdlib_library_to_source)
-  source = go.library_to_source(go, ctx.attr, library, False)
-  return [source, library]
+  return [
+      DefaultInfo(files = depset(outputs)),
+      GoStdLib(
+          root = root_file,
+          headers = [headers_dir],
+          libs = [libs_dir],
+          tools = [tools_dir],
+          mode = stdlib_mode,
+      ),
+  ]
 
 stdlib = go_rule(
     _stdlib_impl,
@@ -93,32 +95,30 @@ stdlib = go_rule(
             cfg = "host",
             default = Label("@io_bazel_rules_go//go/tools/builders:filter_buildid"),
         ),
+        "_sdk_headers": attr.label(
+            allow_files = True,
+            cfg = "data",
+            default = Label("@go_sdk//:headers"),
+        ),
+        "_sdk_srcs": attr.label(
+            allow_files = True,
+            cfg = "data",
+            default = Label("@go_sdk//:srcs"),
+        ),
     },
 )
 
-def _sdk_stdlib_library_to_source(go, attr, source, merge):
-  root_file = go._ctx.file.root
-  libs = go._ctx.files.libs
-  headers = go._ctx.files.headers
-  tools = go._ctx.files.tools
-  files = [root_file, go.go] + libs + headers + tools
-  source["stdlib"] = GoStdLib(
-      root_file = root_file,
-      mode = go.mode,
-      libs = libs,
-      headers = headers,
-      files = files,
-  )
-
 def _sdk_stdlib_impl(ctx):
-  go = go_context(ctx)
-  library = go.new_library(go, resolver = _sdk_stdlib_library_to_source)
-  source = go.library_to_source(go, ctx.attr, library, False)
-  return [source, library]
+  return [GoStdLib(
+      root = ctx.file.root,
+      headers = ctx.files.headers,
+      libs = ctx.files.libs,
+      tools = ctx.files.tools,
+      mode = ctx.attr.mode,
+  )]
 
-sdk_stdlib = go_rule(
+sdk_stdlib = rule(
     _sdk_stdlib_impl,
-    bootstrap = True,
     attrs = {
         "root": attr.label(
             allow_single_file = True,
@@ -136,24 +136,17 @@ sdk_stdlib = go_rule(
             allow_files = True,
             mandatory = True,
         ),
-        "race": attr.string(
-            values = [
-                "on",
-                "off",
-            ],
-            default = "off",
-        ),
-        "goos": attr.string(
-            values = GOOS.keys(),
-            mandatory = True,
-        ),
-        "goarch": attr.string(
-            values = GOARCH.keys(),
-            mandatory = True,
-        ),
-        "linkmode": attr.string(
-            values = LINKMODES,
-            default = LINKMODE_NORMAL,
-        ),
+        "mode": attr.string(mandatory = True),
     },
 )
+
+def _sdk_stdlib_set(ctx):
+  return [GoStdLibSet(stdlibs = [d[GoStdLib] for d in ctx.attr.deps])]
+
+sdk_stdlib_set = rule(
+    _sdk_stdlib_set,
+    attrs = {
+        "deps": attr.label_list(providers = [GoStdLib]),
+    },
+)
+
