@@ -74,6 +74,7 @@ def _stdlib_impl(ctx):
       DefaultInfo(files = depset(outputs)),
       GoStdLib(
           root = root_file,
+          srcs = [src_dir],
           headers = [headers_dir],
           libs = [libs_dir],
           tools = [tools_dir],
@@ -111,6 +112,7 @@ stdlib = go_rule(
 def _sdk_stdlib_impl(ctx):
   return [GoStdLib(
       root = ctx.file.root,
+      srcs = ctx.files.srcs,
       headers = ctx.files.headers,
       libs = ctx.files.libs,
       tools = ctx.files.tools,
@@ -122,6 +124,9 @@ sdk_stdlib = rule(
     attrs = {
         "root": attr.label(
             allow_single_file = True,
+            mandatory = True,
+        ),
+        "srcs": attr.label_list(
             mandatory = True,
         ),
         "headers": attr.label_list(

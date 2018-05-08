@@ -33,7 +33,7 @@ Please do not rely on it for production use, but feel free to use it and file is
   go = go_context(ctx)
   script_file = go.declare_file(go, ext=".bash")
   gopath = []
-  files = ctx.files.data + go.stdlib.headers + go.stdlib.srcs + go.stdlib.tools
+  files = ctx.files.data + go.stdlib.headers + go.stdlib.srcs + go.sdk_tools
   gopath = []
   packages = []
   for data in ctx.attr.data:

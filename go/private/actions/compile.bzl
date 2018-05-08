@@ -48,9 +48,11 @@ def emit_compile(go,
 
   inputs = (sources + [go.package_list] +
             [archive.data.file for archive in archives] +
-            [go.go] + go.sdk_tools + go.stdlib.libs)
+            go.sdk_tools + go.stdlib.libs)
+  print("inputs:\n%s" % "\n".join([f.path for f in inputs]))
 
   builder_args = go.args(go)
+  builder_args.add("-v")
   builder_args.add(sources, before_each="-src")
   builder_args.add(archives, before_each="-dep", map_fn=_importpath)
   builder_args.add(archives, before_each="-importmap", map_fn=_importmap)

@@ -36,7 +36,10 @@ filegroup(
 
 filegroup(
     name = "tools",
-    srcs = glob(["pkg/tool/**"]),
+    srcs = glob([
+        "pkg/tool/**",
+        "bin/*",
+    ]),
 )
 
 {stdlib_rules}
@@ -54,6 +57,7 @@ exports_files(["ROOT", "packages.txt"])
 _SDK_STDLIB_TPL = """sdk_stdlib(
     name = "{name}",
     root = "ROOT",
+    srcs = [":srcs"],
     headers = [":headers"],
     libs = glob(
         ["pkg/{name}/**/*.a"],
@@ -145,6 +149,7 @@ def _prepare(ctx):
       package_set[package_name] = None
   if not found_all:
     fail("too many files in @go_sdk//:src to scan")
+  package_set["testing/internal/testdeps"] = None # used by generated testmain
   packages = sorted(package_set.keys())
   ctx.file("packages.txt", "\n".join(packages))
 
@@ -164,44 +169,6 @@ def _prepare(ctx):
       stdlib_names = ",\n        ".join(['":{}"'.format(s) for s in stdlib_names]),
   )
   ctx.file("BUILD.bazel", build_content)
-
-# Hack around lack of recursion in Skylark with multiple functions. We
-# don't need to go very deep.
-_COLLECT_IGNORE = ("cmd", "internal", "vendor", "Makefile", "testdata", "README")
-
-def _collect_go_files1(path, go_files):
-  for f in path.readdir():
-    if f.basename in _COLLECT_IGNORE:
-      continue
-    if f.basename.endswith(".go"):
-      go_files.append(f)
-    elif f.basename.find(".") < 0:
-      _collect_go_files2(f, go_files)
-
-def _collect_go_files2(path, go_files):
-  for f in path.readdir():
-    if f.basename in _COLLECT_IGNORE:
-      continue
-    if f.basename.endswith(".go"):
-      go_files.append(f)
-    elif f.basename.find(".") < 0:
-      _collect_go_files3(f, go_files)
-
-def _collect_go_files3(path, go_files):
-  for f in path.readdir():
-    if f.basename in _COLLECT_IGNORE:
-      continue
-    if f.basename.endswith(".go"):
-      go_files.append(f)
-    elif f.basename.find(".") < 0:
-      _collect_go_files4(f, go_files)
-
-def _collect_go_files4(path, go_files):
-  for f in path.readdir():
-    if f.basename in _COLLECT_IGNORE:
-      continue
-    if f.basename.endswith(".go"):
-      go_files.append(f)
 
 def _remote_sdk(ctx, urls, strip_prefix, sha256):
   ctx.download_and_extract(

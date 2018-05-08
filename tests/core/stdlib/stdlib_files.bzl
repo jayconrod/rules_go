@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@io_bazel_rules_go//go/private:providers.bzl", "GoSource")
+load("@io_bazel_rules_go//go/private:providers.bzl", "GoStdLib")
 
 def _stdlib_files_impl(ctx):
-  files = ctx.attr._stdlib[GoSource].stdlib.files
+  files = ctx.attr._stdlib[GoStdLib].libs
   runfiles = ctx.runfiles(files = files)
   return [DefaultInfo(
       files = depset(files),
