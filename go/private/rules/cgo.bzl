@@ -179,7 +179,7 @@ def _cgo_codegen_impl(ctx):
 
   tool_args.add(["-objdir", out_dir])
 
-  inputs = sets.union(ctx.files.srcs, go.crosstool, go.stdlib.files)
+  inputs = sets.union(ctx.files.srcs, go.crosstool, go.stdlib.tools, go.stdlib.headers)
   deps = depset()
   runfiles = ctx.runfiles(collect_data = True)
   for d in ctx.attr.deps:
@@ -288,11 +288,9 @@ def _cgo_import_impl(ctx):
       "-dynout", out,
       "-dynimport", ctx.file.cgo_o,
   ])
+  inputs = [ctx.file.cgo_o, ctx.files.sample_go_srcs[0]] + go.stdlib.tools
   ctx.actions.run(
-      inputs = [
-          ctx.file.cgo_o,
-          ctx.files.sample_go_srcs[0],
-      ] + go.stdlib.files,
+      inputs = inputs,
       outputs = [out],
       executable = go.builders.cgo,
       arguments = [args],

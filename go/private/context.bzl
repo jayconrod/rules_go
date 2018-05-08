@@ -190,7 +190,7 @@ def _infer_importpath(ctx):
     path = path[1:]
   return path, INFERRED_PATH
 
-def _choose_stdlib(mode, default, sdk_stdlibs):
+def _choose_stdlib(mode, default_target, sdk_stdlibs):
   for stdlib in sdk_stdlibs:
     sdk_mode = stdlib_mode_to_go_mode(stdlib.mode)
     if (mode.goos == sdk_mode.goos and
@@ -198,7 +198,7 @@ def _choose_stdlib(mode, default, sdk_stdlibs):
         mode.race == sdk_mode.race and
         mode.link == sdk_mode.link):
       return stdlib
-  return default
+  return default_target[GoStdLib] if default_target else None
 
 def go_context(ctx, attr=None):
   toolchain = ctx.toolchains["@io_bazel_rules_go//go:toolchain"]
@@ -221,7 +221,7 @@ def go_context(ctx, attr=None):
   mode = get_mode(ctx, host_only, toolchain, context_data)
 
   stdlib = _choose_stdlib(mode, getattr(attr, "_stdlib", None), context_data.sdk_stdlibs)
-  root = stdlib.root.dirname if stdlib else context_data.go_binary.root
+  root = stdlib.root.dirname if stdlib else context_data.sdk_root.dirname
 
   env = dict(context_data.env)
   env.update({
@@ -334,14 +334,10 @@ go_context_data = rule(
             cfg = "data",
             default = "@go_sdk//:ROOT",
         ),
-        "_sdk_headers": attr.label(
-            allow_files = True,
-            cfg="host",
-            default="@go_sdk//:headers",
-        ),
         "_sdk_tools": attr.label(
             allow_files = True,
-            default="@go_sdk//:tools",
+            cfg = "host",
+            default = "@go_sdk//:tools",
         ),
         "_sdk_stdlibs": attr.label(
             providers = [GoStdLibSet],

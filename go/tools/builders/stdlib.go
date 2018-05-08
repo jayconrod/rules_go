@@ -25,8 +25,6 @@ import (
 )
 
 func run(args []string) error {
-	panic("DO NOT SUBMIT")
-
 	// process the args
 	flags := flag.NewFlagSet("stdlib", flag.ExitOnError)
 	goenv := envFlags(flags)

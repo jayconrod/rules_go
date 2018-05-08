@@ -119,6 +119,9 @@ def get_mode(ctx, host_only, go_toolchain, go_context_data):
   )
 
 def go_mode_to_stdlib_mode(mode):
+  """Converts a mode struct to a Go install suffix string."""
+  # TODO(jayconrod): find out how the release standard libraries are built
+  # and replicate this more precisely.
   parts = [mode.goos, mode.goarch]
   if mode.race:
     parts.append("race")
@@ -127,6 +130,7 @@ def go_mode_to_stdlib_mode(mode):
   return "_".join(parts)
 
 def stdlib_mode_to_go_mode(stdlib_mode):
+  """Converts a Go install suffix string to a mode struct."""
   parts = stdlib_mode.split("_")
   if len(parts) < 2:
     return None

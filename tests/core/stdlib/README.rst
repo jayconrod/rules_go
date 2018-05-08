@@ -11,3 +11,9 @@ Bazel, which has its own caching mechanism. The build id is influenced by
 all inputs to the build, including cgo environment variables. Since these
 variables may include sandbox paths, they can make the build id
 non-reproducible, even though they don't affect the final binary.
+
+sdk_test
+--------
+
+Checks that Go rules will use a pre-compiled standard library that ships with
+the SDK in the default mode.

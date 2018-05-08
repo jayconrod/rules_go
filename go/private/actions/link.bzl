@@ -16,6 +16,7 @@ load(
     "@io_bazel_rules_go//go/private:common.bzl",
     "SHARED_LIB_EXTENSIONS",
     "as_iterable",
+    "as_list",
     "sets",
 )
 load(
@@ -119,9 +120,10 @@ def emit_link(go,
   if extldflags:
     tool_args.add(["-extldflags", " ".join(extldflags)])
   
+  inputs = (as_list(archive.libs) + as_list(archive.cgo_deps) +
+            [go.go] + go.crosstool + stamp_inputs + go.stdlib.libs + go.sdk_tools)
   go.actions.run(
-      inputs = sets.union(archive.libs, archive.cgo_deps,
-                go.crosstool, stamp_inputs, go.stdlib.files),
+      inputs = inputs,
       outputs = [executable],
       mnemonic = "GoLink",
       executable = go.builders.link,
@@ -132,12 +134,12 @@ def emit_link(go,
 def _bootstrap_link(go, archive, executable, gc_linkopts):
   """See go/toolchains.rst#link for full documentation."""
 
-  inputs = depset([archive.data.file])
+  inputs = [archive.data.file, go.go] + go.stdlib.libs + go.sdk_tools
   args = ["tool", "link", "-s", "-o", executable.path]
   args.extend(gc_linkopts)
   args.append(archive.data.file.path)
   go.actions.run_shell(
-      inputs = inputs + go.stdlib.libs + go.sdk_tools,
+      inputs = inputs,
       outputs = [executable],
       mnemonic = "GoLink",
       command = "export GOROOT=$(pwd)/{} && export GOROOT_FINAL=GOROOT && {} {}".format(go.root, go.go.path, " ".join(args)),

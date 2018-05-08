@@ -57,10 +57,7 @@ _SDK_STDLIB_TPL = """sdk_stdlib(
     headers = [":headers"],
     libs = glob(
         ["pkg/{name}/**/*.a"],
-        exclude = [
-            "pkg/{name}/cmd/**",
-            "pkg/{name}/vendor/**",
-        ],
+        exclude = ["pkg/{name}/cmd/**"],
     ),
     tools = [":tools"],
     mode = "{name}",
@@ -120,20 +117,35 @@ go_local_sdk = repository_rule(
 )
 
 def _prepare(ctx):
-  result = ctx.execute(["date"])
-  ctx.file("begin", result.stdout)
-
   # Create ROOT file. Used as a reference point for SDK stdlibs.
   ctx.file("ROOT", "")
 
   # Create packages.txt, a list of all the standard packages. Used by Gazelle
   # and other tools.
-  go_files = []
+  package_set = {}
   src = ctx.path("src")
-  _collect_go_files1(ctx.path("src"), go_files)
   prefix = str(src) + "/"
-  packages = [str(f.dirname)[len(prefix):] for f in go_files]
-  packages = sorted({p: None for p in packages}.keys())
+  dir_stack = [src]
+  found_all = False
+  for _ in [None] * 10000: # "while"
+    if not dir_stack:
+      found_all = True
+      break
+    d = dir_stack.pop()
+    has_go = False
+    for f in d.readdir():
+      if f.basename in ("cmd", "internal", "vendor", "Makefile", "testdata", "README"):
+        continue
+      if f.basename.endswith(".go"):
+        has_go = True
+      elif f.basename.find(".") < 0:
+        dir_stack.append(f)
+    if has_go:
+      package_name = str(d)[len(prefix):]
+      package_set[package_name] = None
+  if not found_all:
+    fail("too many files in @go_sdk//:src to scan")
+  packages = sorted(package_set.keys())
   ctx.file("packages.txt", "\n".join(packages))
 
   # Create BUILD.bazel. We need to make a list of stdlibs in the pkg directory.
@@ -152,9 +164,6 @@ def _prepare(ctx):
       stdlib_names = ",\n        ".join(['":{}"'.format(s) for s in stdlib_names]),
   )
   ctx.file("BUILD.bazel", build_content)
-
-  result = ctx.execute(["date"])
-  ctx.file("end", result.stdout)
 
 # Hack around lack of recursion in Skylark with multiple functions. We
 # don't need to go very deep.

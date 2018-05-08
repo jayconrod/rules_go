@@ -1,5 +1,6 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_test")
 load(":stdlib_files.bzl", "stdlib_files")
+load(":sdk_test.bzl", "sdk_test")
 
 go_test(
     name = "buildid_test",
@@ -9,3 +10,5 @@ go_test(
 )
 
 stdlib_files(name = "stdlib_files")
+
+sdk_test(name = "sdk_test")
