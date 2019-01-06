@@ -26,11 +26,16 @@ load(
 def _go_host_sdk_impl(ctx):
     goroot = _detect_host_sdk(ctx)
     platform = _detect_sdk_platform(ctx, goroot)
-    _sdk_build_file(ctx, platform)
     _local_sdk(ctx, goroot)
+    _prepare_sdk(ctx, platform)
 
 _go_host_sdk = repository_rule(
     _go_host_sdk_impl,
+    attrs = {
+        "_build_file_tpl": attr.label(
+            default = "@io_bazel_rules_go//go/private:BUILD.sdk.bazel",
+        ),
+    },
     environ = ["GOROOT"],
 )
 
@@ -47,8 +52,8 @@ def _go_download_sdk_impl(ctx):
     if platform not in sdks:
         fail("Unsupported platform {}".format(platform))
     filename, sha256 = ctx.attr.sdks[platform]
-    _sdk_build_file(ctx, platform)
     _remote_sdk(ctx, [url.format(filename) for url in ctx.attr.urls], ctx.attr.strip_prefix, sha256)
+    _prepare_sdk(ctx, platform)
 
 _go_download_sdk = repository_rule(
     _go_download_sdk_impl,
@@ -58,6 +63,9 @@ _go_download_sdk = repository_rule(
         "sdks": attr.string_list_dict(),
         "urls": attr.string_list(default = ["https://dl.google.com/go/{}"]),
         "strip_prefix": attr.string(default = "go"),
+        "_build_file_tpl": attr.label(
+            default = "@io_bazel_rules_go//go/private:BUILD.sdk.bazel",
+        ),
     },
 )
 
@@ -68,13 +76,16 @@ def go_download_sdk(name, **kwargs):
 def _go_local_sdk_impl(ctx):
     goroot = ctx.attr.path
     platform = _detect_sdk_platform(ctx, goroot)
-    _sdk_build_file(ctx, platform)
     _local_sdk(ctx, goroot)
+    _prepare_sdk(ctx, platform)
 
 _go_local_sdk = repository_rule(
     _go_local_sdk_impl,
     attrs = {
         "path": attr.string(),
+        "_build_file_tpl": attr.label(
+            default = "@io_bazel_rules_go//go/private:BUILD.sdk.bazel",
+        ),
     },
 )
 
@@ -85,8 +96,8 @@ def go_local_sdk(name, **kwargs):
 def _go_wrap_sdk_impl(ctx):
     goroot = str(ctx.path(ctx.attr.root_file).dirname)
     platform = _detect_sdk_platform(ctx, goroot)
-    _sdk_build_file(ctx, platform)
     _local_sdk(ctx, goroot)
+    _prepare_sdk(ctx, platform)
 
 _go_wrap_sdk = repository_rule(
     _go_wrap_sdk_impl,
@@ -94,6 +105,9 @@ _go_wrap_sdk = repository_rule(
         "root_file": attr.label(
             mandatory = True,
             doc = "A file in the SDK root direcotry. Used to determine GOROOT.",
+        ),
+        "_build_file_tpl": attr.label(
+            default = "@io_bazel_rules_go//go/private:BUILD.sdk.bazel",
         ),
     },
 )
@@ -120,12 +134,12 @@ def _local_sdk(ctx, path):
     for entry in ["src", "pkg", "bin"]:
         ctx.symlink(path + "/" + entry, entry)
 
-def _sdk_build_file(ctx, platform):
+def _prepare_sdk(ctx, platform):
     ctx.file("ROOT")
     goos, _, goarch = platform.partition("_")
     ctx.template(
         "BUILD.bazel",
-        Label("@io_bazel_rules_go//go/private:BUILD.sdk.bazel"),
+        ctx.attr._build_file_tpl,
         executable = False,
         substitutions = {
             "{goos}": goos,
@@ -133,6 +147,23 @@ def _sdk_build_file(ctx, platform):
             "{exe}": ".exe" if goos == "windows" else "",
         },
     )
+
+    globs = _glob_lines(ctx, "HEADERS", ["pkg/include", "-name", "*.h"])
+    globs.extend(_glob_lines(ctx, "LIBS", ["pkg/{}_{}".format(goos, goarch), "-name", "*.a"]))
+    globs.extend(_glob_lines(ctx, "SRCS", ["src", "-type", "f"]))
+    globs.extend(_glob_lines(ctx, "TOOLS", ["pkg/tool", "bin", "-path", "pkg/tool/*", "-type", "f", "-o", "-path", "bin/gofmt*"]))
+    ctx.file("globs.bzl", "\n".join(globs))
+
+def _glob_lines(ctx, name, find_args):
+    command = ["find", "-L"] + find_args
+    res = ctx.execute(command)
+    if res.return_code:
+        fail("failed running '{}':\n{}".format(" ".join(command), res.stderr))
+    files = sorted(res.stdout.strip().split("\n"))
+    lines = [name + " = ["]
+    lines.extend(['    "{}",'.format(f) for f in files])
+    lines.extend(["]", ""])
+    return lines
 
 def _detect_host_platform(ctx):
     if ctx.os.name == "linux":
