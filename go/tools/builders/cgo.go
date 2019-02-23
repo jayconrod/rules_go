@@ -92,7 +92,7 @@ func cgo(args []string) error {
 		if err != nil {
 			return err
 		}
-		metadata, err := readGoMetadata(build.Default, in, true)
+		metadata, err := readFileInfo(build.Default, in, true)
 		if err != nil {
 			return err
 		}

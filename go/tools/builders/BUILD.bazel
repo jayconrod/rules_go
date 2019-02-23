@@ -26,6 +26,7 @@ filegroup(
         "builder.go",
         "cgo.go",
         "compile.go",
+        "compilepkg.go",
         "cover.go",
         "env.go",
         "extract.go",

@@ -44,7 +44,7 @@ func asm(args []string) error {
 	source := flags.Args()[0]
 
 	// Filter the input file.
-	metadata, err := readGoMetadata(build.Default, source, false)
+	metadata, err := readFileInfo(build.Default, source, false)
 	if err != nil {
 		return err
 	}

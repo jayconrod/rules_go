@@ -20,12 +20,10 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"go/build"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -64,42 +62,37 @@ func compile(args []string) error {
 	}
 
 	// Filter sources using build constraints.
-	var matcher func(f *goMetadata) bool
-	switch *testfilter {
-	case "off":
-		matcher = func(f *goMetadata) bool {
-			return true
-		}
-	case "only":
-		matcher = func(f *goMetadata) bool {
-			return strings.HasSuffix(f.filename, ".go") && strings.HasSuffix(f.pkg, "_test")
-		}
-	case "exclude":
-		matcher = func(f *goMetadata) bool {
-			return !strings.HasSuffix(f.filename, ".go") || !strings.HasSuffix(f.pkg, "_test")
-		}
-	default:
-		return fmt.Errorf("Invalid test filter %q", *testfilter)
-	}
-	// apply build constraints to the source list
-	all, err := readFiles(build.Default, unfiltered)
+	all, err := filterAndSplitFiles(unfiltered)
 	if err != nil {
 		return err
 	}
-	var goFiles, sFiles, hFiles []*goMetadata
-	for _, f := range all {
-		if matcher(f) {
-			switch path.Ext(f.filename) {
-			case ".go":
-				goFiles = append(goFiles, f)
-			case ".s":
-				sFiles = append(sFiles, f)
-			case ".h":
-				hFiles = append(hFiles, f)
-			default:
-				return fmt.Errorf("unknown file extension: %s", f.filename)
+	goFiles, sFiles, hFiles := all.goSrcs, all.sSrcs, all.hSrcs
+	if len(all.cSrcs) > 0 {
+		return fmt.Errorf("unexpected C file: %s", all.cSrcs[0].filename)
+	}
+	if len(all.cxxSrcs) > 0 {
+		return fmt.Errorf("unexpected C++ file: %s", all.cxxSrcs[0].filename)
+	}
+	switch *testfilter {
+	case "off":
+	case "only":
+		testFiles := make([]fileInfo, 0, len(goFiles))
+		for _, f := range goFiles {
+			if strings.HasSuffix(f.pkg, "_test") {
+				testFiles = append(testFiles, f)
 			}
 		}
+		goFiles = testFiles
+	case "exclude":
+		libFiles := make([]fileInfo, 0, len(goFiles))
+		for _, f := range goFiles {
+			if !strings.HasSuffix(f.pkg, "_test") {
+				libFiles = append(libFiles, f)
+			}
+		}
+		goFiles = libFiles
+	default:
+		return fmt.Errorf("invalid test filter %q", *testfilter)
 	}
 	if len(goFiles) == 0 {
 		// We need to run the compiler to create a valid archive, even if there's
@@ -109,7 +102,7 @@ func compile(args []string) error {
 		if err := ioutil.WriteFile(emptyPath, []byte("package empty\n"), 0666); err != nil {
 			return err
 		}
-		goFiles = append(goFiles, &goMetadata{filename: emptyPath, pkg: "empty"})
+		goFiles = append(goFiles, fileInfo{filename: emptyPath, pkg: "empty"})
 	}
 
 	if *packagePath == "" {
@@ -209,7 +202,7 @@ func compile(args []string) error {
 
 // TODO(#1891): consolidate this logic when compile and asm are in the
 // same binary.
-func buildSymabisFile(goenv *env, sFiles, hFiles []*goMetadata, asmhdr string) (string, error) {
+func buildSymabisFile(goenv *env, sFiles, hFiles []fileInfo, asmhdr string) (string, error) {
 	if len(sFiles) == 0 {
 		return "", nil
 	}
@@ -279,7 +272,7 @@ func buildSymabisFile(goenv *env, sFiles, hFiles []*goMetadata, asmhdr string) (
 	return symabisName, err
 }
 
-func checkDirectDeps(files []*goMetadata, archives []archive, packageList string) (depImports, stdImports []string, err error) {
+func checkDirectDeps(files []fileInfo, archives []archive, packageList string) (depImports, stdImports []string, err error) {
 	packagesTxt, err := ioutil.ReadFile(packageList)
 	if err != nil {
 		log.Fatal(err)

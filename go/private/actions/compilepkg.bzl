@@ -1,4 +1,4 @@
-# Copyright 2014 The Bazel Authors. All rights reserved.
+# Copyright 2019 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,18 +25,14 @@ def _archive(v):
         v.data.export_file.path if v.data.export_file else "",
     )
 
-def emit_compile(
+def emit_compilepkg(
         go,
         sources = None,
         importpath = "",  # actually importmap, left as importpath for compatibility
         archives = [],
         out_lib = None,
         out_export = None,
-        gc_goopts = [],
-        testfilter = None,
-        asmhdr = None):
-    """See go/toolchains.rst#compile for full documentation."""
-
+        gc_goopts = []):
     if sources == None:
         fail("sources is a required parameter")
     if out_lib == None:
@@ -47,45 +43,40 @@ def emit_compile(
               go.sdk.tools + go.sdk.headers + go.stdlib.libs)
     outputs = [out_lib]
 
-    builder_args = go.builder_args(go, "compile")
+    builder_args = go.builder_args(go, "compilepkg")
     builder_args.add_all(sources, before_each = "-src")
     builder_args.add_all(archives, before_each = "-arc", map_each = _archive)
-    builder_args.add("-o", out_lib)
+    if importpath:
+        builder_args.add("-p", importpath)
     builder_args.add("-package_list", go.package_list)
-    if testfilter:
-        builder_args.add("-testfilter", testfilter)
+    builder_args.add("-o", out_lib)
     if go.nogo:
         builder_args.add("-nogo", go.nogo)
         builder_args.add("-x", out_export)
-        inputs.append(go.nogo)
+        inputs.add(go.nogo)
         inputs.extend([archive.data.export_file for archive in archives if archive.data.export_file])
         outputs.append(out_export)
 
-    tool_args = go.tool_args(go)
-    if asmhdr:
-        builder_args.add("-asmhdr", asmhdr)
-        outputs.append(asmhdr)
-    tool_args.add("-trimpath", ".")
-
-    #TODO: Check if we really need this expand make variables in here
-    #TODO: If we really do then it needs to be moved all the way back out to the rule
-    gc_goopts = [go._ctx.expand_make_variables("gc_goopts", f, {}) for f in gc_goopts]
-    tool_args.add_all(gc_goopts)
+    gc_args = go.tool_args(go)
+    gc_args.add_all([
+        go._ctx.expand_make_variables("gc_goopts", f, {})
+        for f in gc_goopts
+    ])
+    gc_args.add("-trimpath", ".")
     if go.mode.race:
-        tool_args.add("-race")
+        gc_args.add("-race")
     if go.mode.msan:
-        tool_args.add("-msan")
-    tool_args.add_all(link_mode_args(go.mode))
-    if importpath:
-        builder_args.add("-p", importpath)
+        gc_args.add("-msan")
     if go.mode.debug:
-        tool_args.add_all(["-N", "-l"])
-    tool_args.add_all(go.toolchain.flags.compile)
+        gc_args.add_all(["-N", "-l"])
+    gc_args.add_all(go.toolchain.flags.compile)
+    gc_args.add_all(link_mode_args(go.mode))
+        
     go.actions.run(
         inputs = inputs,
         outputs = outputs,
-        mnemonic = "GoCompile",
+        mnemonic = "GoCompilePkg",
         executable = go.toolchain._builder,
-        arguments = [builder_args, "--", tool_args],
+        arguments = [builder_args, "--", gc_args],
         env = go.env,
     )
