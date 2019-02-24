@@ -63,8 +63,7 @@ def emit_archive(go, source = None):
     if (len(split.asm) + len(split.headers) + len(split.c) + len(split.cxx) + len(split.objc) == 0 and
         len(source.cgo_archives) == 0 and
         not go.nogo and
-        not covered and
-        not testfilter):
+        not covered):
         # TODO(jayconrod): emit_compilepkg doesn't support the features tested
         # above. When it does, inline it here and remove the "else".
         emit_compilepkg(
@@ -74,7 +73,8 @@ def emit_archive(go, source = None):
             archives = direct,
             out_lib = out_lib,
             out_export = None,
-            gc_goopts = source.gc_goopts)
+            gc_goopts = source.gc_goopts,
+            testfilter = testfilter)
     else:
         if go.nogo:
             # TODO(#1847): write nogo data into a new section in the .a file instead

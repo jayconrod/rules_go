@@ -18,9 +18,11 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func compilePkg(args []string) error {
@@ -36,6 +38,7 @@ func compilePkg(args []string) error {
 	var unfilteredSrcs multiFlag
 	var deps compileArchiveMultiFlag
 	var packagePath, nogoPath, packageListPath, outPath, outExportPath string
+	var testFilter string
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, or .s file to be filtered and compiled")
 	fs.Var(&deps, "arc", "Import path, package path, and file name of a direct dependency, separated by '='")
 	fs.StringVar(&packagePath, "p", "", "The package path (importmap) of the package being compiled")
@@ -43,6 +46,7 @@ func compilePkg(args []string) error {
 	fs.StringVar(&packageListPath, "package_list", "", "The file containing the list of standard library packages")
 	fs.StringVar(&outPath, "o", "", "The output archive file to write")
 	fs.StringVar(&outExportPath, "x", "", "The nogo facts file to write")
+	fs.StringVar(&testFilter, "testfilter", "off", "Controls test package filtering")
 	if err := fs.Parse(builderArgs); err != nil {
 		return err
 	}
@@ -55,6 +59,31 @@ func compilePkg(args []string) error {
 	srcs, err := filterAndSplitFiles(unfilteredSrcs)
 	if err != nil {
 		return err
+	}
+
+	// TODO(jayconrod): remove -testfilter flag. The test action should compile
+	// the main, internal, and external packages by calling compileArchive
+	// with the correct sources for each.
+	switch testFilter {
+	case "off":
+	case "only":
+		testSrcs := make([]fileInfo, 0, len(srcs.goSrcs))
+		for _, f := range srcs.goSrcs {
+			if strings.HasSuffix(f.pkg, "_test") {
+				testSrcs = append(testSrcs, f)
+			}
+		}
+		srcs.goSrcs = testSrcs
+	case "exclude":
+		libSrcs := make([]fileInfo, 0, len(srcs.goSrcs))
+		for _, f := range srcs.goSrcs {
+			if !strings.HasSuffix(f.pkg, "_test") {
+				libSrcs = append(libSrcs, f)
+			}
+		}
+		srcs.goSrcs = libSrcs
+	default:
+		return fmt.Errorf("invalid test filter %q", testFilter)
 	}
 
 	return compileArchive(goenv, packagePath, srcs, deps, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outExportPath)

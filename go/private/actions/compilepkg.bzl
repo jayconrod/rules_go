@@ -32,7 +32,8 @@ def emit_compilepkg(
         archives = [],
         out_lib = None,
         out_export = None,
-        gc_goopts = []):
+        gc_goopts = [],
+        testfilter = None):  # TODO: remove when test action compiles packages
     if sources == None:
         fail("sources is a required parameter")
     if out_lib == None:
@@ -56,6 +57,8 @@ def emit_compilepkg(
         inputs.add(go.nogo)
         inputs.extend([archive.data.export_file for archive in archives if archive.data.export_file])
         outputs.append(out_export)
+    if testfilter:
+        builder_args.add("-testfilter", testfilter)
 
     gc_args = go.tool_args(go)
     gc_args.add_all([
