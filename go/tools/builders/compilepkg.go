@@ -17,10 +17,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,7 +42,7 @@ func compilePkg(args []string) error {
 	goenv := envFlags(fs)
 	var unfilteredSrcs, cgoArchivePaths multiFlag
 	var deps compileArchiveMultiFlag
-	var packagePath, nogoPath, packageListPath, outPath, outExportPath string
+	var packagePath, nogoPath, packageListPath, outPath, outFactsPath string
 	var testFilter string
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, or .s file to be filtered and compiled")
 	fs.Var(&deps, "arc", "Import path, package path, and file name of a direct dependency, separated by '='")
@@ -47,7 +51,7 @@ func compilePkg(args []string) error {
 	fs.StringVar(&nogoPath, "nogo", "", "The nogo binary. If unset, nogo will not be run.")
 	fs.StringVar(&packageListPath, "package_list", "", "The file containing the list of standard library packages")
 	fs.StringVar(&outPath, "o", "", "The output archive file to write")
-	fs.StringVar(&outExportPath, "x", "", "The nogo facts file to write")
+	fs.StringVar(&outFactsPath, "x", "", "The nogo facts file to write")
 	fs.StringVar(&testFilter, "testfilter", "off", "Controls test package filtering")
 	if err := fs.Parse(builderArgs); err != nil {
 		return err
@@ -88,10 +92,10 @@ func compilePkg(args []string) error {
 		return fmt.Errorf("invalid test filter %q", testFilter)
 	}
 
-	return compileArchive(goenv, packagePath, srcs, deps, cgoArchivePaths, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outExportPath)
+	return compileArchive(goenv, packagePath, srcs, deps, cgoArchivePaths, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outFactsPath)
 }
 
-func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []archive, cgoArchivePaths, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outExportPath string) error {
+func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []archive, cgoArchivePaths, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outFactsPath string) error {
 	// TODO: run cgo commands
 	// TODO: coverage
 	// TODO: nogo
@@ -114,6 +118,10 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 		})
 		defer os.Remove(emptyPath)
 	}
+	goSrcs := make([]string, len(srcs.goSrcs))
+	for i, src := range srcs.goSrcs {
+		goSrcs[i] = src.filename
+	}
 
 	// Check that the filtered sources don't import anything outside of
 	// the standard library and the direct dependencies.
@@ -129,6 +137,22 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 	}
 	defer os.Remove(importcfgPath)
 
+	// Run nogo concurrently.
+	var nogoChan chan error
+	if nogoPath != "" {
+		ctx, cancel := context.WithCancel(context.Background())
+		nogoChan = make(chan error)
+		go func() {
+			nogoChan <- runNogo(ctx, nogoPath, goSrcs, deps, stdImports, packagePath, importcfgPath, outFactsPath)
+		}()
+		defer func() {
+			if nogoChan != nil {
+				cancel()
+				<-nogoChan
+			}
+		}()
+	}
+
 	// If there are assembly files, and this is go1.12+, generate symbol ABIs.
 	asmHdrPath := ""
 	if len(srcs.sSrcs) > 0 {
@@ -143,10 +167,6 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 	}
 
 	// Compile the filtered .go files.
-	goSrcs := make([]string, len(srcs.goSrcs))
-	for i, src := range srcs.goSrcs {
-		goSrcs[i] = src.filename
-	}
 	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, asmHdrPath, symabisPath, gcFlags, outPath); err != nil {
 		return err
 	}
@@ -197,6 +217,15 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 		}
 	}
 
+	// Check results from nogo.
+	if nogoChan != nil {
+		err := <-nogoChan
+		nogoChan = nil // no cancellation needed
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -215,4 +244,35 @@ func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, asmHdrPath
 	args = append(args, srcs...)
 	absArgs(args, []string{"-I", "-o", "-trimpath", "-importcfg"})
 	return goenv.runCommand(args)
+}
+
+func runNogo(ctx context.Context, nogoPath string, srcs []string, deps []archive, stdImports []string, packagePath, importcfgPath, outFactsPath string) error {
+	args := []string{nogoPath}
+	args = append(args, "-p", packagePath)
+	args = append(args, "-importcfg", importcfgPath)
+	for _, imp := range stdImports {
+		args = append(args, "-stdimport", imp)
+	}
+	for _, dep := range deps {
+		if dep.xFile != "" {
+			args = append(args, "-fact", fmt.Sprintf("%s=%s", dep.importPath, dep.xFile))
+		}
+	}
+	args = append(args, "-x", outFactsPath)
+	args = append(args, srcs...)
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	out := &bytes.Buffer{}
+	cmd.Stdout, cmd.Stderr = out, out
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return errors.New(out.String())
+		} else {
+			if out.Len() != 0 {
+				fmt.Fprintln(os.Stderr, out.String())
+			}
+			return fmt.Errorf("error running nogo: %v", err)
+		}
+	}
+	return nil
 }

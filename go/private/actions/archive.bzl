@@ -48,7 +48,12 @@ def emit_archive(go, source = None):
     split = split_srcs(source.srcs)
     lib_name = source.library.importmap + ".a"
     out_lib = go.declare_file(go, path = lib_name)
-    out_export = None
+    if go.nogo:
+        # TODO(#1847): write nogo data into a new section in the .a file instead
+        # of writing a separate file.
+        out_export = go.declare_file(go, path = lib_name[:-len(".a")] + ".x")
+    else:
+        out_export = None
     searchpath = out_lib.path[:-len(lib_name)]
     testfilter = getattr(source.library, "testfilter", None)
 
@@ -61,7 +66,6 @@ def emit_archive(go, source = None):
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
 
     if (len(split.c) + len(split.cxx) + len(split.objc) == 0 and
-        not go.nogo and
         not covered):
         # TODO(jayconrod): emit_compilepkg doesn't support the features tested
         # above. When it does, inline it here and remove the "else".
@@ -71,16 +75,11 @@ def emit_archive(go, source = None):
             importpath = source.library.importmap,
             archives = direct,
             out_lib = out_lib,
-            out_export = None,
+            out_export = out_export,
             gc_goopts = source.gc_goopts,
             cgo_archives = source.cgo_archives,
             testfilter = testfilter)
     else:
-        if go.nogo:
-            # TODO(#1847): write nogo data into a new section in the .a file instead
-            # of writing a separate file.
-            out_export = go.declare_file(go, path = lib_name[:-len(".a")] + ".x")
-
         if covered:
             direct.append(go.coverdata)
 

@@ -57,7 +57,7 @@ def emit_compilepkg(
     if go.nogo:
         builder_args.add("-nogo", go.nogo)
         builder_args.add("-x", out_export)
-        inputs.add(go.nogo)
+        inputs.append(go.nogo)
         inputs.extend([archive.data.export_file for archive in archives if archive.data.export_file])
         outputs.append(out_export)
     if testfilter:
