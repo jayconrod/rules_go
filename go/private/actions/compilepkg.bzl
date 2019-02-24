@@ -30,6 +30,7 @@ def emit_compilepkg(
         sources = None,
         importpath = "",  # actually importmap, left as importpath for compatibility
         archives = [],
+        cgo_archives = [],
         out_lib = None,
         out_export = None,
         gc_goopts = [],
@@ -41,12 +42,14 @@ def emit_compilepkg(
 
     inputs = (sources + [go.package_list] +
               [archive.data.file for archive in archives] +
+              cgo_archives +
               go.sdk.tools + go.sdk.headers + go.stdlib.libs)
     outputs = [out_lib]
 
     builder_args = go.builder_args(go, "compilepkg")
     builder_args.add_all(sources, before_each = "-src")
     builder_args.add_all(archives, before_each = "-arc", map_each = _archive)
+    builder_args.add_all(cgo_archives, before_each = "-cgoarc")
     if importpath:
         builder_args.add("-p", importpath)
     builder_args.add("-package_list", go.package_list)

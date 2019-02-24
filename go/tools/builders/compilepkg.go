@@ -36,12 +36,13 @@ func compilePkg(args []string) error {
 	gcFlags, asmFlags := splitArgs(args)
 	fs := flag.NewFlagSet("GoCompilePkg", flag.ExitOnError)
 	goenv := envFlags(fs)
-	var unfilteredSrcs multiFlag
+	var unfilteredSrcs, cgoArchivePaths multiFlag
 	var deps compileArchiveMultiFlag
 	var packagePath, nogoPath, packageListPath, outPath, outExportPath string
 	var testFilter string
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, or .s file to be filtered and compiled")
 	fs.Var(&deps, "arc", "Import path, package path, and file name of a direct dependency, separated by '='")
+	fs.Var(&cgoArchivePaths, "cgoarc", "Path to a C/C++/ObjC archive to repack into the Go archive. May be repeated.")
 	fs.StringVar(&packagePath, "p", "", "The package path (importmap) of the package being compiled")
 	fs.StringVar(&nogoPath, "nogo", "", "The nogo binary. If unset, nogo will not be run.")
 	fs.StringVar(&packageListPath, "package_list", "", "The file containing the list of standard library packages")
@@ -87,10 +88,10 @@ func compilePkg(args []string) error {
 		return fmt.Errorf("invalid test filter %q", testFilter)
 	}
 
-	return compileArchive(goenv, packagePath, srcs, deps, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outExportPath)
+	return compileArchive(goenv, packagePath, srcs, deps, cgoArchivePaths, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outExportPath)
 }
 
-func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []archive, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outExportPath string) error {
+func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []archive, cgoArchivePaths, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outExportPath string) error {
 	// TODO: run cgo commands
 	// TODO: coverage
 	// TODO: nogo
@@ -176,6 +177,22 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 			}
 		}
 		if err := appendFiles(goenv, outPath, objPaths); err != nil {
+			return err
+		}
+	}
+
+	// Extract cgo archvies and re-pack them into the archive.
+	if len(cgoArchivePaths) > 0 {
+		names := map[string]struct{}{}
+		var allObjPaths []string
+		for _, cgoArchivePath := range cgoArchivePaths {
+			objPaths, err := extractFiles(cgoArchivePath, workDir, names)
+			if err != nil {
+				return err
+			}
+			allObjPaths = append(allObjPaths, objPaths...)
+		}
+		if err := appendFiles(goenv, outPath, allObjPaths); err != nil {
 			return err
 		}
 	}

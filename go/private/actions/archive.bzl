@@ -61,7 +61,6 @@ def emit_archive(go, source = None):
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
 
     if (len(split.c) + len(split.cxx) + len(split.objc) == 0 and
-        len(source.cgo_archives) == 0 and
         not go.nogo and
         not covered):
         # TODO(jayconrod): emit_compilepkg doesn't support the features tested
@@ -74,6 +73,7 @@ def emit_archive(go, source = None):
             out_lib = out_lib,
             out_export = None,
             gc_goopts = source.gc_goopts,
+            cgo_archives = source.cgo_archives,
             testfilter = testfilter)
     else:
         if go.nogo:
