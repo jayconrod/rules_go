@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -90,14 +91,17 @@ func compilePkg(args []string) error {
 }
 
 func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []archive, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outExportPath string) error {
-	// TODO: compile processed cgo files
 	// TODO: run cgo commands
 	// TODO: coverage
-	// TODO: assembly
 	// TODO: nogo
-	// TODO: test filtering
+	workDir, cleanup, err := goenv.workDir()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	if len(srcs.goSrcs) == 0 {
-		emptyPath := filepath.Join(filepath.Dir(outPath), "_empty.go")
+		emptyPath := filepath.Join(workDir, "_empty.go")
 		if err := ioutil.WriteFile(emptyPath, []byte("package empty\n"), 0666); err != nil {
 			return err
 		}
@@ -110,34 +114,83 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 		defer os.Remove(emptyPath)
 	}
 
+	// Check that the filtered sources don't import anything outside of
+	// the standard library and the direct dependencies.
 	_, stdImports, err := checkDirectDeps(srcs.goSrcs, deps, packageListPath)
 	if err != nil {
 		return err
 	}
 
+	// Build an importcfg file for the compiler.
 	importcfgPath, err := buildImportcfgFileForCompile(deps, stdImports, goenv.installSuffix, filepath.Dir(outPath))
 	if err != nil {
 		return err
 	}
 	defer os.Remove(importcfgPath)
 
+	// If there are assembly files, and this is go1.12+, generate symbol ABIs.
+	asmHdrPath := ""
+	if len(srcs.sSrcs) > 0 {
+		asmHdrPath = filepath.Join(workDir, "go_asm.h")
+	}
+	symabisPath, err := buildSymabisFile(goenv, srcs.sSrcs, srcs.hSrcs, asmHdrPath)
+	if symabisPath != "" {
+		defer os.Remove(symabisPath)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Compile the filtered .go files.
 	goSrcs := make([]string, len(srcs.goSrcs))
 	for i, src := range srcs.goSrcs {
 		goSrcs[i] = src.filename
 	}
-	asmHdrPath := ""
-	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, asmHdrPath, gcFlags, outPath); err != nil {
+	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, asmHdrPath, symabisPath, gcFlags, outPath); err != nil {
 		return err
+	}
+
+	// Compile the .s files, and pack them into the archive.
+	if len(srcs.sSrcs) > 0 {
+		includeSet := map[string]struct{}{
+			filepath.Join(os.Getenv("GOROOT"), "pkg", "include"): struct{}{},
+			workDir: struct{}{},
+		}
+		for _, hdr := range srcs.hSrcs {
+			includeSet[filepath.Dir(hdr.filename)] = struct{}{}
+		}
+		includes := make([]string, len(includeSet))
+		for inc := range includeSet {
+			includes = append(includes, inc)
+		}
+		sort.Strings(includes)
+		asmFlags := make([]string, 0, len(includeSet)*2)
+		for _, inc := range includes {
+			asmFlags = append(asmFlags, "-I", inc)
+		}
+		objPaths := make([]string, len(srcs.sSrcs))
+		for i, sSrc := range srcs.sSrcs {
+			objPaths[i] = filepath.Join(workDir, fmt.Sprintf("s%d.o", i))
+			if err := asmFile(goenv, sSrc.filename, asmFlags, objPaths[i]); err != nil {
+				return err
+			}
+		}
+		if err := appendFiles(goenv, outPath, objPaths); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, asmHdrPath string, gcFlags []string, outPath string) error {
+func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, asmHdrPath, symabisPath string, gcFlags []string, outPath string) error {
 	args := goenv.goTool("compile")
 	args = append(args, "-p", packagePath, "-importcfg", importcfgPath, "-pack")
 	if asmHdrPath != "" {
 		args = append(args, "-asmhdr", asmHdrPath)
+	}
+	if symabisPath != "" {
+		args = append(args, "-symabis", symabisPath)
 	}
 	args = append(args, gcFlags...)
 	args = append(args, "-o", outPath)

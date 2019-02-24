@@ -25,8 +25,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -198,78 +196,6 @@ func compile(args []string) error {
 		fmt.Fprintln(os.Stderr, nogoOutput.String())
 	}
 	return nil
-}
-
-// TODO(#1891): consolidate this logic when compile and asm are in the
-// same binary.
-func buildSymabisFile(goenv *env, sFiles, hFiles []fileInfo, asmhdr string) (string, error) {
-	if len(sFiles) == 0 {
-		return "", nil
-	}
-
-	// Check version. The symabis file is only required and can only be built
-	// starting at go1.12.
-	version := runtime.Version()
-	if strings.HasPrefix(version, "go1.") {
-		minor := version[len("go1."):]
-		if i := strings.IndexByte(minor, '.'); i >= 0 {
-			minor = minor[:i]
-		}
-		n, err := strconv.Atoi(minor)
-		if err == nil && n <= 11 {
-			return "", nil
-		}
-		// Fall through if the version can't be parsed. It's probably a newer
-		// development version.
-	}
-
-	// Create an empty go_asm.h file. The compiler will write this later, but
-	// we need one to exist now.
-	asmhdrFile, err := os.Create(asmhdr)
-	if err != nil {
-		return "", err
-	}
-	if err := asmhdrFile.Close(); err != nil {
-		return "", err
-	}
-	asmhdrDir := filepath.Dir(asmhdr)
-
-	// Create a temporary output file. The caller is responsible for deleting it.
-	var symabisName string
-	symabisFile, err := ioutil.TempFile("", "symabis")
-	if err != nil {
-		return "", err
-	}
-	symabisName = symabisFile.Name()
-	symabisFile.Close()
-
-	// Run the assembler.
-	wd, err := os.Getwd()
-	if err != nil {
-		return symabisName, err
-	}
-	asmargs := goenv.goTool("asm")
-	asmargs = append(asmargs, "-trimpath", wd)
-	asmargs = append(asmargs, "-I", wd)
-	asmargs = append(asmargs, "-I", filepath.Join(os.Getenv("GOROOT"), "pkg", "include"))
-	asmargs = append(asmargs, "-I", asmhdrDir)
-	seenHdrDirs := map[string]bool{wd: true, asmhdrDir: true}
-	for _, hFile := range hFiles {
-		hdrDir := filepath.Dir(abs(hFile.filename))
-		if !seenHdrDirs[hdrDir] {
-			asmargs = append(asmargs, "-I", hdrDir)
-			seenHdrDirs[hdrDir] = true
-		}
-	}
-	// TODO(#1894): define GOOS_goos, GOARCH_goarch, both here and in the
-	// GoAsm action.
-	asmargs = append(asmargs, "-gensymabis", "-o", symabisName, "--")
-	for _, sFile := range sFiles {
-		asmargs = append(asmargs, sFile.filename)
-	}
-
-	err = goenv.runCommand(asmargs)
-	return symabisName, err
 }
 
 func checkDirectDeps(files []fileInfo, archives []archive, packageList string) (depImports, stdImports []string, err error) {

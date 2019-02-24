@@ -60,7 +60,7 @@ def emit_archive(go, source = None):
         if a.source.mode != go.mode:
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
 
-    if (len(split.asm) + len(split.headers) + len(split.c) + len(split.cxx) + len(split.objc) == 0 and
+    if (len(split.c) + len(split.cxx) + len(split.objc) == 0 and
         len(source.cgo_archives) == 0 and
         not go.nogo and
         not covered):
@@ -68,7 +68,7 @@ def emit_archive(go, source = None):
         # above. When it does, inline it here and remove the "else".
         emit_compilepkg(
             go,
-            sources = split.go,
+            sources = split.go + split.asm + split.headers,
             importpath = source.library.importmap,
             archives = direct,
             out_lib = out_lib,
