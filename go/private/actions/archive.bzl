@@ -61,7 +61,7 @@ def emit_archive(go, source = None):
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
 
     if (len(split.asm) + len(split.headers) + len(split.c) + len(split.cxx) + len(split.objc) == 0 and
-        not any(["cgo" in f.basename for f in split.go]) and
+        len(source.cgo_archives) == 0 and
         not go.nogo and
         not covered and
         not testfilter):

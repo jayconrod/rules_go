@@ -97,20 +97,16 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 		goSrcs[i] = src.filename
 	}
 	asmHdrPath := ""
-	complete := true
-	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, asmHdrPath, gcFlags, complete, outPath); err != nil {
+	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, asmHdrPath, gcFlags, outPath); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, asmHdrPath string, gcFlags []string, complete bool, outPath string) error {
+func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, asmHdrPath string, gcFlags []string, outPath string) error {
 	args := goenv.goTool("compile")
 	args = append(args, "-p", packagePath, "-importcfg", importcfgPath, "-pack")
-	if complete {
-		args = append(args, "-complete")
-	}
 	if asmHdrPath != "" {
 		args = append(args, "-asmhdr", asmHdrPath)
 	}
