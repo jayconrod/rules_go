@@ -28,7 +28,9 @@ def _archive(v):
 def emit_compilepkg(
         go,
         sources = None,
-        importpath = "",  # actually importmap, left as importpath for compatibility
+        cover = None,
+        importpath = "",
+        importmap = "",
         archives = [],
         cgo_archives = [],
         out_lib = None,
@@ -48,10 +50,17 @@ def emit_compilepkg(
 
     builder_args = go.builder_args(go, "compilepkg")
     builder_args.add_all(sources, before_each = "-src")
+    if cover and go.coverdata:
+        inputs.append(go.coverdata.data.file)
+        builder_args.add("-arc", _archive(go.coverdata))
+        builder_args.add("-cover_mode", "set")
+        builder_args.add_all(cover, before_each = "-cover")
     builder_args.add_all(archives, before_each = "-arc", map_each = _archive)
     builder_args.add_all(cgo_archives, before_each = "-cgoarc")
     if importpath:
-        builder_args.add("-p", importpath)
+        builder_args.add("-importpath", importpath)
+    if importmap:
+        builder_args.add("-p", importmap)
     builder_args.add("-package_list", go.package_list)
     builder_args.add("-o", out_lib)
     if go.nogo:

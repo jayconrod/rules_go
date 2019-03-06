@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -40,16 +41,19 @@ func compilePkg(args []string) error {
 	gcFlags, asmFlags := splitArgs(args)
 	fs := flag.NewFlagSet("GoCompilePkg", flag.ExitOnError)
 	goenv := envFlags(fs)
-	var unfilteredSrcs, cgoArchivePaths multiFlag
+	var unfilteredSrcs, coverSrcs, cgoArchivePaths multiFlag
 	var deps compileArchiveMultiFlag
-	var packagePath, nogoPath, packageListPath, outPath, outFactsPath string
+	var importPath, packagePath, nogoPath, packageListPath, coverMode, outPath, outFactsPath string
 	var testFilter string
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, or .s file to be filtered and compiled")
+	fs.Var(&coverSrcs, "cover", ".go file that should be instrumented for coverage (must also be a -src)")
 	fs.Var(&deps, "arc", "Import path, package path, and file name of a direct dependency, separated by '='")
 	fs.Var(&cgoArchivePaths, "cgoarc", "Path to a C/C++/ObjC archive to repack into the Go archive. May be repeated.")
+	fs.StringVar(&importPath, "importpath", "", "The import path of the package being compiled. Not passed to the compiler, but may be displayed in debug data.")
 	fs.StringVar(&packagePath, "p", "", "The package path (importmap) of the package being compiled")
 	fs.StringVar(&nogoPath, "nogo", "", "The nogo binary. If unset, nogo will not be run.")
 	fs.StringVar(&packageListPath, "package_list", "", "The file containing the list of standard library packages")
+	fs.StringVar(&coverMode, "cover_mode", "", "The coverage mode to use. Empty if coverage instrumentation should not be added.")
 	fs.StringVar(&outPath, "o", "", "The output archive file to write")
 	fs.StringVar(&outFactsPath, "x", "", "The nogo facts file to write")
 	fs.StringVar(&testFilter, "testfilter", "off", "Controls test package filtering")
@@ -58,6 +62,9 @@ func compilePkg(args []string) error {
 	}
 	if err := goenv.checkFlags(); err != nil {
 		return err
+	}
+	if importPath == "" {
+		importPath = packagePath
 	}
 	outPath = abs(outPath)
 
@@ -92,12 +99,11 @@ func compilePkg(args []string) error {
 		return fmt.Errorf("invalid test filter %q", testFilter)
 	}
 
-	return compileArchive(goenv, packagePath, srcs, deps, cgoArchivePaths, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outFactsPath)
+	return compileArchive(goenv, importPath, packagePath, srcs, deps, cgoArchivePaths, coverMode, coverSrcs, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outFactsPath)
 }
 
-func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []archive, cgoArchivePaths, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outFactsPath string) error {
+func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs, deps []archive, cgoArchivePaths []string, coverMode string, coverSrcs, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outFactsPath string) error {
 	// TODO: run cgo commands
-	// TODO: coverage
 	// TODO: nogo
 	workDir, cleanup, err := goenv.workDir()
 	if err != nil {
@@ -136,6 +142,33 @@ func compileArchive(goenv *env, packagePath string, srcs archiveSrcs, deps []arc
 		return err
 	}
 	defer os.Remove(importcfgPath)
+
+	// Instrument source files for coverage.
+	if coverMode != "" {
+		shouldCover := make(map[string]bool)
+		for _, s := range coverSrcs {
+			shouldCover[s] = true
+		}
+
+		for i, origSrc := range goSrcs {
+			if !shouldCover[origSrc] {
+				continue
+			}
+
+			srcName := origSrc
+			if importPath != "" {
+				srcName = path.Join(importPath, filepath.Base(origSrc))
+			}
+
+			coverVar := fmt.Sprintf("Cover_%s_%s", sanitizePathForIdentifier(importPath), sanitizePathForIdentifier(origSrc[:len(origSrc)-len(".go")]))
+			coverSrc := filepath.Join(workDir, fmt.Sprintf("cover_%d.go", i))
+			if err := instrumentForCoverage(goenv, origSrc, srcName, coverVar, coverMode, coverSrc); err != nil {
+				return err
+			}
+
+			goSrcs[i] = coverSrc
+		}
+	}
 
 	// Run nogo concurrently.
 	var nogoChan chan error
@@ -275,4 +308,9 @@ func runNogo(ctx context.Context, nogoPath string, srcs []string, deps []archive
 		}
 	}
 	return nil
+}
+
+func sanitizePathForIdentifier(path string) string {
+	r := strings.NewReplacer("/", "_", "-", "_", ".", "_")
+	return r.Replace(path)
 }

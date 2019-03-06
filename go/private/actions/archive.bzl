@@ -29,6 +29,7 @@ load(
     "@io_bazel_rules_go//go/private:providers.bzl",
     "GoArchive",
     "GoArchiveData",
+    "effective_importpath_pkgpath",
     "get_archive",
 )
 load(
@@ -42,9 +43,6 @@ def emit_archive(go, source = None):
     if source == None:
         fail("source is a required parameter")
 
-    covered = bool(go.cover and go.coverdata and source.cover)
-    if covered:
-        source = go.cover(go, source)
     split = split_srcs(source.srcs)
     lib_name = source.library.importmap + ".a"
     out_lib = go.declare_file(go, path = lib_name)
@@ -65,14 +63,17 @@ def emit_archive(go, source = None):
         if a.source.mode != go.mode:
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
 
-    if (len(split.c) + len(split.cxx) + len(split.objc) == 0 and
-        not covered):
+    if len(split.c) + len(split.cxx) + len(split.objc) == 0:
+        # TODO(jayconrod): Before using GoCompilePkg for coverage and cgo,
+        # have a plan for exposing generated files to providers.
         # TODO(jayconrod): emit_compilepkg doesn't support the features tested
         # above. When it does, inline it here and remove the "else".
         emit_compilepkg(
             go,
             sources = split.go + split.asm + split.headers,
-            importpath = source.library.importmap,
+            cover = source.cover,
+            importpath = effective_importpath_pkgpath(source.library)[0],
+            importmap = source.library.importmap,
             archives = direct,
             out_lib = out_lib,
             out_export = out_export,
@@ -80,7 +81,8 @@ def emit_archive(go, source = None):
             cgo_archives = source.cgo_archives,
             testfilter = testfilter)
     else:
-        if covered:
+        if bool(go.cover and go.coverdata and source.cover):
+            source = go.cover(go, source)
             direct.append(go.coverdata)
 
         asmhdr = None
