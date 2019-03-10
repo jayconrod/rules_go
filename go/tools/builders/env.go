@@ -89,7 +89,8 @@ func (e *env) workDir() (path string, cleanup func(), err error) {
 	if e.workDirPath != "" {
 		return e.workDirPath, func() {}, nil
 	}
-	e.workDirPath, err = ioutil.TempDir("", "")
+	// Keep the stem "rules_go_work" in sync with reproducible_binary_test.go.
+	e.workDirPath, err = ioutil.TempDir("", "rules_go_work-")
 	if err != nil {
 		return "", func() {}, err
 	}

@@ -33,6 +33,10 @@ load(
     "get_archive",
 )
 load(
+    "@io_bazel_rules_go//go/private:rules/cgo.bzl",
+    "cgo_configure",
+)
+load(
     "@io_bazel_rules_go//go/private:actions/compilepkg.bzl",
     "emit_compilepkg",
 )
@@ -63,14 +67,44 @@ def emit_archive(go, source = None):
         if a.source.mode != go.mode:
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
 
-    if len(split.c) + len(split.cxx) + len(split.objc) == 0:
-        # TODO(jayconrod): Before using GoCompilePkg for coverage and cgo,
-        # have a plan for exposing generated files to providers.
-        # TODO(jayconrod): emit_compilepkg doesn't support the features tested
-        # above. When it does, inline it here and remove the "else".
+    if not source.cgo_archives:
+        # TODO(jayconrod): We still need to support the legacy cgo path when
+        # Objective C sources are present, since the Objective C toolchain
+        # isn't exposed to Starlark. The legacy path runs cgo as a separate
+        # action, then builds generated code with cc_library / objc_library.
+        # A go_library compiles generated Go code and packs the other
+        # objects from cgo_archives. "cgo_archives" is not supported on
+        # the new path because we do all that in one action.
+
+        # TODO(jayconrod): do we need to do full Bourne tokenization here?
+        cppopts = [f for fs in source.cppopts for f in fs.split(" ")]
+        copts = [f for fs in source.copts for f in fs.split(" ")]
+        cxxopts = [f for fs in source.cxxopts for f in fs.split(" ")]
+        clinkopts = [f for fs in source.clinkopts for f in fs.split(" ")]
+
+        cgo_inputs = depset()
+        cgo_deps = depset()
+        if source.cgo:
+            cgo = cgo_configure(
+                go,
+                srcs = split.go + split.c + split.asm + split.cxx + split.headers,
+                cdeps = source.cdeps,
+                cppopts = cppopts,
+                copts = copts,
+                cxxopts = cxxopts,
+                clinkopts = clinkopts,
+            )
+            runfiles = runfiles.merge(cgo.runfiles)
+            cgo_inputs = cgo.inputs
+            cgo_deps = cgo.deps
+            cppopts = cgo.cppopts
+            copts = cgo.copts
+            cxxopts = cgo.cxxopts
+            clinkopts = cgo.clinkopts
+
         emit_compilepkg(
             go,
-            sources = split.go + split.asm + split.headers,
+            sources = split.go + split.c + split.asm + split.cxx + split.headers,
             cover = source.cover,
             importpath = effective_importpath_pkgpath(source.library)[0],
             importmap = source.library.importmap,
@@ -78,9 +112,18 @@ def emit_archive(go, source = None):
             out_lib = out_lib,
             out_export = out_export,
             gc_goopts = source.gc_goopts,
+            cgo = source.cgo,
+            cgo_inputs = cgo_inputs,
+            cppopts = cppopts,
+            copts = copts,
+            cxxopts = cxxopts,
+            clinkopts = clinkopts,
             cgo_archives = source.cgo_archives,
-            testfilter = testfilter)
+            testfilter = testfilter,
+        )
     else:
+        cgo_deps = source.cgo_deps
+
         if bool(go.cover and go.coverdata and source.cover):
             source = go.cover(go, source)
             direct.append(go.coverdata)
@@ -158,7 +201,7 @@ def emit_archive(go, source = None):
         libs = sets.union([out_lib], *[a.libs for a in direct]),
         transitive = sets.union([data], *[a.transitive for a in direct]),
         x_defs = x_defs,
-        cgo_deps = sets.union(source.cgo_deps, *[a.cgo_deps for a in direct]),
+        cgo_deps = sets.union(cgo_deps, *[a.cgo_deps for a in direct]),
         cgo_exports = sets.union(source.cgo_exports, *[a.cgo_exports for a in direct]),
         runfiles = runfiles,
         mode = go.mode,

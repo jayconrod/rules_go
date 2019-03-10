@@ -41,12 +41,13 @@ const (
 	goExt ext = iota
 	cExt
 	cxxExt
+	mExt
 	sExt
 	hExt
 )
 
 type archiveSrcs struct {
-	goSrcs, cSrcs, cxxSrcs, sSrcs, hSrcs []fileInfo
+	goSrcs, cSrcs, cxxSrcs, mSrcs, sSrcs, hSrcs []fileInfo
 }
 
 // filterAndSplitFiles filters files using build constraints and collates
@@ -69,6 +70,8 @@ func filterAndSplitFiles(fileNames []string) (archiveSrcs, error) {
 			srcs = &res.cSrcs
 		case cxxExt:
 			srcs = &res.cxxSrcs
+		case mExt:
+			srcs = &res.mSrcs
 		case sExt:
 			srcs = &res.sSrcs
 		case hExt:
@@ -93,6 +96,8 @@ func readFileInfo(bctx build.Context, input string, needPackage bool) (fileInfo,
 			fi.ext = cExt
 		case ".cc", ".cxx", ".cpp":
 			fi.ext = cxxExt
+		case ".m", ".mm":
+			fi.ext = mExt
 		case ".s":
 			fi.ext = sExt
 		case ".h":
@@ -107,7 +112,6 @@ func readFileInfo(bctx build.Context, input string, needPackage bool) (fileInfo,
 	// Skip cgo files, since they get rejected (due to leading '_') and won't
 	// have any build constraints anyway.
 	if strings.HasPrefix(base, "_cgo") {
-		fi.isCgo = true
 		fi.matched = true
 	} else {
 		match, err := bctx.MatchFile(dir, base)

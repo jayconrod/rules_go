@@ -25,6 +25,7 @@ filegroup(
         "asm.go",
         "builder.go",
         "cgo.go",
+        "cgo2.go",
         "compile.go",
         "compilepkg.go",
         "cover.go",

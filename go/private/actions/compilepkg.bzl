@@ -16,6 +16,10 @@ load(
     "@io_bazel_rules_go//go/private:mode.bzl",
     "link_mode_args",
 )
+load(
+    "@io_bazel_rules_go//go/private:skylib/lib/shell.bzl",
+    "shell",
+)
 
 def _archive(v):
     return "{}={}={}={}".format(
@@ -32,6 +36,12 @@ def emit_compilepkg(
         importpath = "",
         importmap = "",
         archives = [],
+        cgo = False,
+        cgo_inputs = depset(),
+        cppopts = [],
+        copts = [],
+        cxxopts = [],
+        clinkopts = [],
         cgo_archives = [],
         out_lib = None,
         out_export = None,
@@ -47,51 +57,68 @@ def emit_compilepkg(
               cgo_archives +
               go.sdk.tools + go.sdk.headers + go.stdlib.libs)
     outputs = [out_lib]
+    env = go.env
 
-    builder_args = go.builder_args(go, "compilepkg")
-    builder_args.add_all(sources, before_each = "-src")
+    args = go.builder_args(go, "compilepkg")
+    args.add_all(sources, before_each = "-src")
     if cover and go.coverdata:
         inputs.append(go.coverdata.data.file)
-        builder_args.add("-arc", _archive(go.coverdata))
-        builder_args.add("-cover_mode", "set")
-        builder_args.add_all(cover, before_each = "-cover")
-    builder_args.add_all(archives, before_each = "-arc", map_each = _archive)
-    builder_args.add_all(cgo_archives, before_each = "-cgoarc")
+        args.add("-arc", _archive(go.coverdata))
+        args.add("-cover_mode", "set")
+        args.add_all(cover, before_each = "-cover")
+    args.add_all(archives, before_each = "-arc", map_each = _archive)
     if importpath:
-        builder_args.add("-importpath", importpath)
+        args.add("-importpath", importpath)
     if importmap:
-        builder_args.add("-p", importmap)
-    builder_args.add("-package_list", go.package_list)
-    builder_args.add("-o", out_lib)
+        args.add("-p", importmap)
+    args.add("-package_list", go.package_list)
+
+    args.add("-o", out_lib)
     if go.nogo:
-        builder_args.add("-nogo", go.nogo)
-        builder_args.add("-x", out_export)
+        args.add("-nogo", go.nogo)
+        args.add("-x", out_export)
         inputs.append(go.nogo)
         inputs.extend([archive.data.export_file for archive in archives if archive.data.export_file])
         outputs.append(out_export)
     if testfilter:
-        builder_args.add("-testfilter", testfilter)
+        args.add("-testfilter", testfilter)
 
-    gc_args = go.tool_args(go)
-    gc_args.add_all([
+    gc_goopts = [
         go._ctx.expand_make_variables("gc_goopts", f, {})
         for f in gc_goopts
-    ])
-    gc_args.add("-trimpath", ".")
+    ]
     if go.mode.race:
-        gc_args.add("-race")
+        gc_goopts.append("-race")
     if go.mode.msan:
-        gc_args.add("-msan")
+        gc_goopts.append("-msan")
     if go.mode.debug:
-        gc_args.add_all(["-N", "-l"])
-    gc_args.add_all(go.toolchain.flags.compile)
-    gc_args.add_all(link_mode_args(go.mode))
-        
+        gc_goopts.extend(["-N", "-l"])
+    gc_goopts.extend(go.toolchain.flags.compile)
+    gc_goopts.extend(link_mode_args(go.mode))
+    args.add("-gcflags", _quote_opts(gc_goopts))
+
+    env = go.env
+    if cgo:
+        inputs.extend(cgo_inputs.to_list())  # OPT: don't expand depset
+        inputs.extend(go.crosstool)
+        env["CC"] = go.cgo_tools.c_compiler_path
+        if cppopts:
+            args.add("-cppflags", _quote_opts(cppopts))
+        if copts:
+            args.add("-cflags", _quote_opts(copts))
+        if cxxopts:
+            args.add("-cxxflags", _quote_opts(cxxopts))
+        if clinkopts:
+            args.add("-ldflags", _quote_opts(clinkopts))
+
     go.actions.run(
         inputs = inputs,
         outputs = outputs,
         mnemonic = "GoCompilePkg",
         executable = go.toolchain._builder,
-        arguments = [builder_args, "--", gc_args],
+        arguments = [args],
         env = go.env,
     )
+
+def _quote_opts(opts):
+    return " ".join([shell.quote(opt) if " " in opt else opt for opt in opts])

@@ -37,27 +37,35 @@ func compilePkg(args []string) error {
 	if err != nil {
 		return err
 	}
-	builderArgs, args := splitArgs(args)
-	gcFlags, asmFlags := splitArgs(args)
+
 	fs := flag.NewFlagSet("GoCompilePkg", flag.ExitOnError)
 	goenv := envFlags(fs)
 	var unfilteredSrcs, coverSrcs, cgoArchivePaths multiFlag
 	var deps compileArchiveMultiFlag
-	var importPath, packagePath, nogoPath, packageListPath, coverMode, outPath, outFactsPath string
+	var importPath, packagePath, nogoPath, packageListPath, coverMode string
+	var outPath, outFactsPath, cgoExportHPath string
 	var testFilter string
+	var gcFlags, asmFlags, cppFlags, cFlags, cxxFlags, ldFlags quoteMultiFlag
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, or .s file to be filtered and compiled")
 	fs.Var(&coverSrcs, "cover", ".go file that should be instrumented for coverage (must also be a -src)")
 	fs.Var(&deps, "arc", "Import path, package path, and file name of a direct dependency, separated by '='")
 	fs.Var(&cgoArchivePaths, "cgoarc", "Path to a C/C++/ObjC archive to repack into the Go archive. May be repeated.")
 	fs.StringVar(&importPath, "importpath", "", "The import path of the package being compiled. Not passed to the compiler, but may be displayed in debug data.")
 	fs.StringVar(&packagePath, "p", "", "The package path (importmap) of the package being compiled")
+	fs.Var(&gcFlags, "gcflags", "Go compiler flags")
+	fs.Var(&asmFlags, "asmflags", "Go assembler flags")
+	fs.Var(&cppFlags, "cppflags", "C preprocessor flags")
+	fs.Var(&cFlags, "cflags", "C compiler flags")
+	fs.Var(&cxxFlags, "cxxflags", "C++ compiler flags")
+	fs.Var(&ldFlags, "ldflags", "C linker flags")
 	fs.StringVar(&nogoPath, "nogo", "", "The nogo binary. If unset, nogo will not be run.")
 	fs.StringVar(&packageListPath, "package_list", "", "The file containing the list of standard library packages")
 	fs.StringVar(&coverMode, "cover_mode", "", "The coverage mode to use. Empty if coverage instrumentation should not be added.")
 	fs.StringVar(&outPath, "o", "", "The output archive file to write")
 	fs.StringVar(&outFactsPath, "x", "", "The nogo facts file to write")
+	fs.StringVar(&cgoExportHPath, "cgoexport", "", "The _cgo_exports.h file to write")
 	fs.StringVar(&testFilter, "testfilter", "off", "Controls test package filtering")
-	if err := fs.Parse(builderArgs); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if err := goenv.checkFlags(); err != nil {
@@ -66,6 +74,8 @@ func compilePkg(args []string) error {
 	if importPath == "" {
 		importPath = packagePath
 	}
+	cgoEnabled := os.Getenv("CGO_ENABLED") == "1"
+	cc := os.Getenv("CC")
 	outPath = abs(outPath)
 
 	// Filter sources.
@@ -99,12 +109,53 @@ func compilePkg(args []string) error {
 		return fmt.Errorf("invalid test filter %q", testFilter)
 	}
 
-	return compileArchive(goenv, importPath, packagePath, srcs, deps, cgoArchivePaths, coverMode, coverSrcs, gcFlags, asmFlags, nogoPath, packageListPath, outPath, outFactsPath)
+	return compileArchive(
+		goenv,
+		importPath,
+		packagePath,
+		srcs,
+		deps,
+		cgoArchivePaths,
+		coverMode,
+		coverSrcs,
+		cgoEnabled,
+		cc,
+		gcFlags,
+		asmFlags,
+		cppFlags,
+		cFlags,
+		cxxFlags,
+		ldFlags,
+		nogoPath,
+		packageListPath,
+		outPath,
+		outFactsPath,
+		cgoExportHPath)
 }
 
-func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs, deps []archive, cgoArchivePaths []string, coverMode string, coverSrcs, gcFlags, asmFlags []string, nogoPath, packageListPath, outPath, outFactsPath string) error {
-	// TODO: run cgo commands
-	// TODO: nogo
+func compileArchive(
+	goenv *env,
+	importPath string,
+	packagePath string,
+	srcs archiveSrcs,
+	deps []archive,
+	cgoArchivePaths []string,
+	coverMode string,
+	coverSrcs []string,
+	cgoEnabled bool,
+	cc string,
+	gcFlags []string,
+	asmFlags []string,
+	cppFlags []string,
+	cFlags []string,
+	cxxFlags []string,
+	ldFlags []string,
+	nogoPath string,
+	packageListPath string,
+	outPath string,
+	outFactsPath string,
+	cgoExportHPath string) error {
+
 	workDir, cleanup, err := goenv.workDir()
 	if err != nil {
 		return err
@@ -124,24 +175,35 @@ func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs
 		})
 		defer os.Remove(emptyPath)
 	}
-	goSrcs := make([]string, len(srcs.goSrcs))
-	for i, src := range srcs.goSrcs {
-		goSrcs[i] = src.filename
+	packageName := srcs.goSrcs[0].pkg
+	var goSrcs, cgoSrcs []string
+	for _, src := range srcs.goSrcs {
+		if src.isCgo {
+			cgoSrcs = append(cgoSrcs, src.filename)
+		} else {
+			goSrcs = append(goSrcs, src.filename)
+		}
 	}
-
-	// Check that the filtered sources don't import anything outside of
-	// the standard library and the direct dependencies.
-	_, stdImports, err := checkDirectDeps(srcs.goSrcs, deps, packageListPath)
-	if err != nil {
-		return err
+	cSrcs := make([]string, len(srcs.cSrcs))
+	for i, src := range srcs.cSrcs {
+		cSrcs[i] = src.filename
 	}
-
-	// Build an importcfg file for the compiler.
-	importcfgPath, err := buildImportcfgFileForCompile(deps, stdImports, goenv.installSuffix, filepath.Dir(outPath))
-	if err != nil {
-		return err
+	cxxSrcs := make([]string, len(srcs.cxxSrcs))
+	for i, src := range srcs.cxxSrcs {
+		cxxSrcs[i] = src.filename
 	}
-	defer os.Remove(importcfgPath)
+	if len(srcs.mSrcs) > 0 {
+		return errors.New("Objective C sources not supported by GoCompilePkg")
+	}
+	sSrcs := make([]string, len(srcs.sSrcs))
+	for i, src := range srcs.sSrcs {
+		sSrcs[i] = src.filename
+	}
+	hSrcs := make([]string, len(srcs.hSrcs))
+	for i, src := range srcs.hSrcs {
+		hSrcs[i] = src.filename
+	}
+	haveCgo := len(cgoSrcs)+len(cSrcs)+len(cxxSrcs) > 0
 
 	// Instrument source files for coverage.
 	if coverMode != "" {
@@ -150,7 +212,11 @@ func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs
 			shouldCover[s] = true
 		}
 
-		for i, origSrc := range goSrcs {
+		combined := append([]string{}, goSrcs...)
+		if cgoEnabled {
+			combined = append(combined, cgoSrcs...)
+		}
+		for i, origSrc := range combined {
 			if !shouldCover[origSrc] {
 				continue
 			}
@@ -166,9 +232,59 @@ func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs
 				return err
 			}
 
-			goSrcs[i] = coverSrc
+			if i < len(goSrcs) {
+				goSrcs[i] = coverSrc
+			} else {
+				cgoSrcs[i-len(goSrcs)] = coverSrc
+			}
 		}
 	}
+
+	// If we have cgo, generate separate C and go files, and compile the
+	// C files.
+	var objFiles []string
+	if cgoEnabled && haveCgo {
+		// TODO(#2006): Compile .s and .S files with cgo2, not the Go assembler.
+		// If cgo is not enabled or we don't have other cgo sources, don't
+		// compile .S files.
+		var srcDir string
+		srcDir, goSrcs, objFiles, err = cgo2(goenv, goSrcs, cgoSrcs, cSrcs, cxxSrcs, nil, hSrcs, packagePath, packageName, cc, cppFlags, cFlags, cxxFlags, ldFlags, cgoExportHPath)
+		if err != nil {
+			return err
+		}
+
+		gcFlags = append(gcFlags, "-trimpath="+srcDir)
+	} else {
+		gcFlags = append(gcFlags, "-trimpath=.")
+	}
+
+	// Check that the filtered sources don't import anything outside of
+	// the standard library and the direct dependencies.
+	_, stdImports, err := checkDirectDeps(srcs.goSrcs, deps, packageListPath)
+	if err != nil {
+		return err
+	}
+	if cgoEnabled && len(cgoSrcs) != 0 {
+		// cgo generated code imports some extra packages.
+		cgoStdImports := map[string]struct{}{
+			"runtime/cgo": struct{}{},
+			"syscall":     struct{}{},
+			"unsafe":      struct{}{},
+		}
+		for _, imp := range stdImports {
+			delete(cgoStdImports, imp)
+		}
+		for imp := range cgoStdImports {
+			stdImports = append(stdImports, imp)
+		}
+	}
+
+	// Build an importcfg file for the compiler.
+	importcfgPath, err := buildImportcfgFileForCompile(deps, stdImports, goenv.installSuffix, filepath.Dir(outPath))
+	if err != nil {
+		return err
+	}
+	defer os.Remove(importcfgPath)
 
 	// Run nogo concurrently.
 	var nogoChan chan error
@@ -204,7 +320,7 @@ func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs
 		return err
 	}
 
-	// Compile the .s files, and pack them into the archive.
+	// Compile the .s files.
 	if len(srcs.sSrcs) > 0 {
 		includeSet := map[string]struct{}{
 			filepath.Join(os.Getenv("GOROOT"), "pkg", "include"): struct{}{},
@@ -222,30 +338,31 @@ func compileArchive(goenv *env, importPath, packagePath string, srcs archiveSrcs
 		for _, inc := range includes {
 			asmFlags = append(asmFlags, "-I", inc)
 		}
-		objPaths := make([]string, len(srcs.sSrcs))
 		for i, sSrc := range srcs.sSrcs {
-			objPaths[i] = filepath.Join(workDir, fmt.Sprintf("s%d.o", i))
-			if err := asmFile(goenv, sSrc.filename, asmFlags, objPaths[i]); err != nil {
+			obj := filepath.Join(workDir, fmt.Sprintf("s%d.o", i))
+			if err := asmFile(goenv, sSrc.filename, asmFlags, obj); err != nil {
 				return err
 			}
-		}
-		if err := appendFiles(goenv, outPath, objPaths); err != nil {
-			return err
+			objFiles = append(objFiles, obj)
 		}
 	}
 
 	// Extract cgo archvies and re-pack them into the archive.
 	if len(cgoArchivePaths) > 0 {
 		names := map[string]struct{}{}
-		var allObjPaths []string
 		for _, cgoArchivePath := range cgoArchivePaths {
-			objPaths, err := extractFiles(cgoArchivePath, workDir, names)
+			arcObjFiles, err := extractFiles(cgoArchivePath, workDir, names)
 			if err != nil {
 				return err
 			}
-			allObjPaths = append(allObjPaths, objPaths...)
+			objFiles = append(objFiles, arcObjFiles...)
 		}
-		if err := appendFiles(goenv, outPath, allObjPaths); err != nil {
+	}
+
+	// Pack .o files into the archive. These may come from cgo generated code,
+	// cgo dependencies (cdeps), or assembly.
+	if len(objFiles) > 0 {
+		if err := appendFiles(goenv, outPath, objFiles); err != nil {
 			return err
 		}
 	}
