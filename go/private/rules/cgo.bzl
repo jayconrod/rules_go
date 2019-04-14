@@ -120,6 +120,7 @@ def cgo_configure(go, srcs, cdeps, cppopts, copts, cxxopts, clinkopts):
     inputs_direct = []
     inputs_transitive = []
     deps_direct = []
+    lib_opts = []
     runfiles = go._ctx.runfiles(collect_data = True)
     for d in cdeps:
         runfiles = runfiles.merge(d.data_runfiles)
@@ -150,10 +151,16 @@ def cgo_configure(go, srcs, cdeps, cppopts, copts, cxxopts, clinkopts):
                 clinkopts.extend(["-L", lib.dirname, "-l", libname])
                 inputs_direct.append(lib)
             else:
-                clinkopts.append(lib.path)
+                lib_opts.append(lib.path)
         clinkopts.extend(cc_link_flags(d))
     inputs = depset(direct = inputs_direct, transitive = inputs_transitive)
     deps = depset(direct = deps_direct)
+
+    # HACK: some C/C++ toolchains will ignore libraries (including dynamic libs
+    # specified with -l flags) unless they appear after .o or .a files with
+    # undefined symbols they provide. Put all the .a files from cdeps first,
+    # so that we actually link with -lstdc++ and others.
+    clinkopts = lib_opts + clinkopts
 
     return struct(
         inputs = inputs,

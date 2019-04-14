@@ -210,7 +210,7 @@ func cgo2(goenv *env, goSrcs, cgoSrcs, cSrcs, cxxSrcs, sSrcs, hSrcs []string, pa
 	if err != nil {
 		return "", nil, nil, err
 	}
-	
+
 	allGoSrcs = make([]string, len(goSrcs)+len(genGoSrcs))
 	for i := range goSrcs {
 		allGoSrcs[i] = filepath.Join(workDir, goBases[i])
@@ -298,7 +298,7 @@ func defaultCFlags() []string {
 	}
 }
 
-func defaultLdFlags() []string{
+func defaultLdFlags() []string {
 	goos, goarch := os.Getenv("GOOS"), os.Getenv("GOARCH")
 	switch {
 	case goos == "android":

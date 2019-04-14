@@ -77,6 +77,9 @@ func compilePkg(args []string) error {
 	cgoEnabled := os.Getenv("CGO_ENABLED") == "1"
 	cc := os.Getenv("CC")
 	outPath = abs(outPath)
+	for i := range unfilteredSrcs {
+		unfilteredSrcs[i] = abs(unfilteredSrcs[i])
+	}
 
 	// Filter sources.
 	srcs, err := filterAndSplitFiles(unfilteredSrcs)
