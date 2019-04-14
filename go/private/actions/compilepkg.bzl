@@ -83,19 +83,25 @@ def emit_compilepkg(
     if testfilter:
         args.add("-testfilter", testfilter)
 
-    gc_goopts = [
+    gc_flags = [
         go._ctx.expand_make_variables("gc_goopts", f, {})
         for f in gc_goopts
     ]
+    asm_flags = []
     if go.mode.race:
-        gc_goopts.append("-race")
+        gc_flags.append("-race")
+        asm_flags.append("-race")
     if go.mode.msan:
-        gc_goopts.append("-msan")
+        gc_flags.append("-msan")
+        asm_flags.append("-msan")
     if go.mode.debug:
-        gc_goopts.extend(["-N", "-l"])
-    gc_goopts.extend(go.toolchain.flags.compile)
-    gc_goopts.extend(link_mode_args(go.mode))
-    args.add("-gcflags", _quote_opts(gc_goopts))
+        gc_flags.extend(["-N", "-l"])
+        asm_flags.extend(["-N", "-l"])
+    gc_flags.extend(go.toolchain.flags.compile)
+    gc_flags.extend(link_mode_args(go.mode))
+    asm_flags.extend(link_mode_args(go.mode))
+    args.add("-gcflags", _quote_opts(gc_flags))
+    args.add("-asmflags", _quote_opts(asm_flags))
 
     env = go.env
     if cgo:
