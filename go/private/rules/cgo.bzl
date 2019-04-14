@@ -42,6 +42,7 @@ load(
     "@io_bazel_rules_go//go/private:mode.bzl",
     "LINKMODE_C_ARCHIVE",
     "LINKMODE_C_SHARED",
+    "LINKMODE_NORMAL",
     "LINKMODE_PIE",
     "extldflags_from_cc_toolchain",
     "mode_string",
@@ -103,6 +104,11 @@ def cgo_configure(go, srcs, cdeps, cppopts, copts, cxxopts, clinkopts):
     copts = go.cgo_tools.c_compile_options + copts
     cxxopts = go.cgo_tools.cxx_compile_options + cxxopts
     clinkopts = extldflags_from_cc_toolchain(go) + clinkopts
+    if go.mode != LINKMODE_NORMAL:
+        if "-fPIC" not in copts:
+            copts.append("-fPIC")
+        if "-fPIC" not in cxxopts:
+            cxxopts.append("-fPIC")
 
     seen_includes = {}
     seen_quote_includes = {}
