@@ -79,7 +79,7 @@ fi
 
 cmd=(
 {bazel} --bazelrc {bazelrc} ${{output_base_arg}} {command}
---experimental_repository_cache={cache_dir} --config {config} {args}
+-s --experimental_repository_cache={cache_dir} --config {config} {args}
 {target}
 )
 echo "${{cmd[*]}}" >bazel-output.txt
