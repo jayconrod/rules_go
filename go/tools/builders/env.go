@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -142,6 +143,21 @@ func (e *env) runCommandToFile(w io.Writer, args []string) error {
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr
 	return runAndLogCommand(cmd, e.verbose)
+}
+
+// outputCommand executes a subprocess and captures the output.
+func (e *env) outputCommand(args []string) ([]byte, error) {
+	cmd := exec.Command(args[0], args[1:]...)
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := runAndLogCommand(cmd, e.verbose)
+	if err != nil {
+		if len(stderr.Bytes()) > 0 {
+			err = fmt.Errorf("%s\n%s", err, stderr.Bytes())
+		}
+		return nil, err
+	}
+	return stdout.Bytes(), nil
 }
 
 func absEnv(envNameList []string, argList []string) error {

@@ -50,9 +50,38 @@ def _should_use_sdk_stdlib(go):
             go.mode.link == LINKMODE_NORMAL)
 
 def _sdk_stdlib(go):
+    package_data = go.declare_file(go, "std_package_data.zip")
+    inputs = (go.sdk.srcs +
+              go.sdk.headers +
+              go.sdk.tools +
+              [go.sdk.go])
+    builder_args = go.builder_args(go, "stdpkgdata")
+    builder_args.add("-o", package_data.path)
+    tool_args = go.tool_args(go)
+    if go.mode.race:
+        tool_args.add("-race")
+    if go.mode.msan:
+        tool_args.add("-msan")
+    tool_args.add_all(link_mode_args(go.mode))
+    env = go.env
+    env.update({
+        "CC": go.cgo_tools.c_compiler_path,
+        "CGO_CFLAGS": " ".join(go.cgo_tools.c_compile_options),
+        "CGO_LDFLAGS": " ".join(extldflags_from_cc_toolchain(go)),
+    })
+    go.actions.run(
+        inputs = inputs,
+        outputs = [package_data],
+        mnemonic = "GoStdPackageData",
+        executable = go.toolchain._builder,
+        arguments = [builder_args, "--", tool_args],
+        env = env,
+    )
+
     return GoStdLib(
         root_file = go.sdk.root_file,
         libs = go.sdk.libs,
+        package_data = package_data,
     )
 
 def _build_stdlib(go):
@@ -89,4 +118,3 @@ def _build_stdlib(go):
         root_file = root_file,
         libs = [pkg],
     )
-

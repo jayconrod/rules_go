@@ -22,6 +22,7 @@ def _go_sdk_impl(ctx):
     if package_list == None:
         package_list = ctx.actions.declare_file("packages.txt")
         _build_package_list(ctx, ctx.files.srcs, ctx.file.root_file, package_list)
+
     return [GoSDK(
         goos = ctx.attr.goos,
         goarch = ctx.attr.goarch,
