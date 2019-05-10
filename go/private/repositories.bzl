@@ -194,10 +194,9 @@ def go_rules_dependencies():
         commit = "41d72d444fbe445f4da89e13be02078734fb7875",  # master, as of 2019-03-03
         patches = [
             # NOTE: diff -urN will not record a hunk for deleting an empty file.
-            # The second patch may not apply on the root build file if
-            # patch is picky about whether it exists. Adjust the timestamp
-            # on the first hunk of the directives patch so it expects an
-            # empty file instead of an absent file.
+            # The second patch may not apply if patch is picky about
+            # whether empty files exist (alpine's patch is picky).
+            # Make sure not to delete empty files in the first patch.
             "@io_bazel_rules_go//third_party:go_googleapis-deletebuild.patch",
             "@io_bazel_rules_go//third_party:go_googleapis-directives.patch",
             "@io_bazel_rules_go//third_party:go_googleapis-gazelle.patch",
