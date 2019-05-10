@@ -40,7 +40,7 @@ def go_rules_dependencies():
         name = "org_golang_x_tools",
         # master, as of 2019-03-03
         remote = "https://go.googlesource.com/tools",
-        commit = "589c23e65e65055d47b9ad4a99723bc389136265", # master, as of 2019-03-03
+        commit = "589c23e65e65055d47b9ad4a99723bc389136265",  # master, as of 2019-03-03
         patches = [
             "@io_bazel_rules_go//third_party:org_golang_x_tools-gazelle.patch",
             "@io_bazel_rules_go//third_party:org_golang_x_tools-extras.patch",
@@ -61,7 +61,7 @@ def go_rules_dependencies():
             "@io_bazel_rules_go//third_party:com_github_golang_protobuf-extras.patch",
         ],
         patch_args = ["-p1"],
-        shallow_since = "1549405252 -0800"
+        shallow_since = "1549405252 -0800",
         # gazelle args: -go_prefix github.com/golang/protobuf -proto disable_global
     )
 
@@ -84,6 +84,7 @@ def go_rules_dependencies():
         commit = "582743bf40c5d3639a70f98f183914a2c0cd0680",  # v3.7.0, as of 2019-03-03
         shallow_since = "1551387314 -0800",
     )
+
     # Workaround for protocolbuffers/protobuf#5472
     # At master, they provide a macro that creates this dependency. We can't
     # load it from here though.
@@ -192,6 +193,11 @@ def go_rules_dependencies():
         remote = "https://github.com/googleapis/googleapis",
         commit = "41d72d444fbe445f4da89e13be02078734fb7875",  # master, as of 2019-03-03
         patches = [
+            # NOTE: diff -urN will not record a hunk for deleting an empty file.
+            # The second patch may not apply on the root build file if
+            # patch is picky about whether it exists. Adjust the timestamp
+            # on the first hunk of the directives patch so it expects an
+            # empty file instead of an absent file.
             "@io_bazel_rules_go//third_party:go_googleapis-deletebuild.patch",
             "@io_bazel_rules_go//third_party:go_googleapis-directives.patch",
             "@io_bazel_rules_go//third_party:go_googleapis-gazelle.patch",

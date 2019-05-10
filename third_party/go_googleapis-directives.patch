@@ -1,5 +1,5 @@
 diff -urN b/BUILD.bazel c/BUILD.bazel
---- b/BUILD.bazel	1969-12-31 19:00:00.000000000 -0500
+--- b/BUILD.bazel	2000-01-01 00:00:00.000000000 -0000
 +++ c/BUILD.bazel	2000-01-01 00:00:00.000000000 -0000
 @@ -0,0 +1,4 @@
 +# gazelle:proto package
