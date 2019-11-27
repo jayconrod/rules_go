@@ -227,8 +227,6 @@ platforms:
     - "-//tests/legacy/test_chdir:go_default_test"
     - "-//tests/legacy/test_rundir:go_default_test"
     - "-//tests/legacy/transitive_data:go_default_test"
-    - "-//tests/reproducibility:go_default_test"
-    - "-//tests/reproducibility:reproducibility"
     test_flags:
     # Go requires a C toolchain that accepts options and emits errors like
     # gcc or clang. The Go SDK does not support MSVC.
@@ -320,5 +318,3 @@ platforms:
     - "-//tests/legacy/test_chdir:go_default_test"
     - "-//tests/legacy/test_rundir:go_default_test"
     - "-//tests/legacy/transitive_data:go_default_test"
-    - "-//tests/reproducibility:go_default_test"
-    - "-//tests/reproducibility:reproducibility"
