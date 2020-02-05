@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 test_suite(
     name = "runfiles_tests",
     tests = [
+        ":action_test",
         ":local_test",
         "@runfiles_remote_test//:remote_test",
     ],
@@ -45,4 +46,26 @@ go_library(
 filegroup(
     name = "local_group",
     srcs = ["local_group.txt"],
+)
+
+go_test(
+    name = "action_test",
+    srcs = ["action_test.go"],
+    args = ["$(location :action_out.txt)"],
+    data = [":action_out.txt"],
+    rundir = ".",
+)
+
+genrule(
+    name = "run_action",
+    outs = ["action_out.txt"],
+    cmd = "$(location :copy_data) >$@",
+    tools = [":copy_data"],
+)
+
+go_binary(
+    name = "copy_data",
+    srcs = ["copy_data.go"],
+    data = ["action_in.txt"],
+    deps = ["//go/tools/bazel:go_default_library"],
 )

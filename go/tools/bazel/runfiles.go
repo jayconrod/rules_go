@@ -355,42 +355,39 @@ func initRunfiles() {
 
 	runfiles.workspace = os.Getenv("TEST_WORKSPACE")
 
+	wd, _ := os.Getwd()
+	parent := filepath.Dir(wd)
 	if dir := os.Getenv("RUNFILES_DIR"); dir != "" {
 		runfiles.dir = dir
 	} else if dir = os.Getenv("TEST_SRCDIR"); dir != "" {
 		runfiles.dir = dir
-	} else if runtime.GOOS != "windows" {
-		dir, err := os.Getwd()
-		if err != nil {
-			runfiles.err = fmt.Errorf("error localting runfiles dir: %v", err)
-			return
+	} else if runtime.GOOS != "windows" && strings.HasSuffix(parent, ".runfiles") {
+		runfiles.dir = parent
+		if runfiles.workspace == "" {
+			runfiles.workspace = filepath.Base(wd)
 		}
-
-		parent := filepath.Dir(dir)
-		if strings.HasSuffix(parent, ".runfiles") {
-			runfiles.dir = parent
-			if runfiles.workspace == "" {
-				runfiles.workspace = filepath.Base(dir)
-			}
-		} else {
-			runfiles.err = errors.New("could not locate runfiles directory")
-			return
+	} else {
+		dir := os.Args[0] + ".runfiles"
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			runfiles.dir = dir
 		}
 	}
-
-	if runfiles.dir != "" {
-		fis, err := ioutil.ReadDir(runfiles.dir)
-		if err != nil {
-			runfiles.err = fmt.Errorf("could not open runfiles directory: %v", err)
-			return
-		}
-		for _, fi := range fis {
-			if fi.IsDir() {
-				runfiles.workspaces = append(runfiles.workspaces, fi.Name())
-			}
-		}
-		sort.Strings(runfiles.workspaces)
+	if runfiles.dir == "" {
+		runfiles.err = errors.New("could not locate runfiles directory")
+		return
 	}
+
+	fis, err := ioutil.ReadDir(runfiles.dir)
+	if err != nil {
+		runfiles.err = fmt.Errorf("could not open runfiles directory: %v", err)
+		return
+	}
+	for _, fi := range fis {
+		if fi.IsDir() {
+			runfiles.workspaces = append(runfiles.workspaces, fi.Name())
+		}
+	}
+	sort.Strings(runfiles.workspaces)
 }
 
 // getCandidates returns the list of all possible "prefix/suffix" paths where there might be an
