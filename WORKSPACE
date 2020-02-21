@@ -96,7 +96,7 @@ http_archive(
     ],
 )
 
-load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
+load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
 
 gazelle_dependencies()
 
@@ -115,4 +115,40 @@ grpc_dependencies()
 local_repository(
     name = "runfiles_remote_test",
     path = "tests/core/runfiles/runfiles_remote_test",
+)
+
+# Needed by //go/tools/releaser
+go_repository(
+    name = "com_github_google_go_github_v29",
+    importpath = "github.com/google/go-github/v29",
+    sum = "h1:IktKCTwU//aFHnpA+2SLIi7Oo9uhAzgsdZNbcAqhgdc=",
+    version = "v29.0.3",
+)
+
+go_repository(
+    name = "org_golang_x_crypto",
+    importpath = "golang.org/x/crypto",
+    sum = "h1:VklqNMn3ovrHsnt90PveolxSbWFaJdECFbxSq0Mqo2M=",
+    version = "v0.0.0-20190308221718-c2843e01d9a2",
+)
+
+go_repository(
+    name = "com_github_google_go_querystring",
+    importpath = "github.com/google/go-querystring",
+    sum = "h1:Xkwi/a1rcvNg1PPYe5vI8GbeBY/jrVuDX5ASuANWTrk=",
+    version = "v1.0.0",
+)
+
+go_repository(
+    name = "org_golang_x_oauth2",
+    importpath = "golang.org/x/oauth2",
+    sum = "h1:TzXSXBo42m9gQenoE3b9BGiEpg5IG2JkU5FkPIawgtw=",
+    version = "v0.0.0-20200107190931-bf48bf16ab8d",
+)
+
+go_repository(
+    name = "org_golang_x_net",
+    importpath = "golang.org/x/net",
+    sum = "h1:oWX7TPOiFAMXLq8o0ikBYfCJVlRHBcsciT5bXOrH628=",
+    version = "v0.0.0-20190311183353-d8887717615a",
 )
