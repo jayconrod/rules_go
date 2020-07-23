@@ -74,10 +74,11 @@ func run(args []string) (err error) {
 
 	fs := flag.NewFlagSet("releaser", flag.ContinueOnError)
 	var version, tokenPath string
-	var runTests bool
+	var runTests, updateBoilerplate bool
 	fs.StringVar(&version, "version", "", "Version to release (for example, 0.2.3)")
 	fs.StringVar(&tokenPath, "token", "", "Path to file containing GitHub token")
 	fs.BoolVar(&runTests, "test", true, "Whether to run tests")
+	fs.BoolVar(&updateBoilerplate, "boilerplate", true, "Whether to update boilerplate in README.rst")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -155,6 +156,16 @@ func run(args []string) (err error) {
 		return fmt.Errorf("no commits on release branch since RULES_GO_VERSION was set. Cherry-pick changes you want, then re-run this command.")
 	}
 
+	// Check that there isn't already a release with that tag.
+	release, err := findRelease(ctx, ghClient, version)
+	var rerr *releaseNotFoundError
+	if err != nil && !errors.As(err, &rerr) {
+		return err
+	}
+	if release != nil && !release.GetDraft() {
+		return fmt.Errorf("version %s was already released", version)
+	}
+
 	// Check that all tests pass.
 	if runTests {
 		log.Printf("running tests...")
@@ -193,64 +204,69 @@ func run(args []string) (err error) {
 
 	// Create a GitHub release.
 	log.Printf("updating draft GitHub release...")
-	release, err := updateRelease(ctx, ghClient, version, releaseBranch, archPath, archHash)
+	release, err = updateRelease(ctx, ghClient, release, version, releaseBranch, archPath, archHash)
 	if err != nil {
 		return err
 	}
 
 	// Update boilerplate.
-	log.Printf("updating boilerplate...")
-	boilerplateBranchName := "update-boilerplate"
-	pr, err := findPRForBranch(ctx, ghClient, boilerplateBranchName)
-	var notFoundErr *prNotFoundError
-	if err != nil && !errors.As(err, &notFoundErr) {
-		return err
-	}
+	var boilerplatePR *github.PullRequest
+	var boilerplateMsg string
+	if updateBoilerplate {
+		log.Printf("updating boilerplate...")
+		boilerplateBranchName := "update-boilerplate"
+		var err error
+		pr, err := findPRForBranch(ctx, ghClient, boilerplateBranchName)
+		var notFoundErr *prNotFoundError
+		if err != nil && !errors.As(err, &notFoundErr) {
+			return err
+		}
 
-	boilerplateBranchExists := branchExists(ws, boilerplateBranchName)
-	if !boilerplateBranchExists {
-		if err := createBranch(ws, boilerplateBranchName, "master"); err != nil {
-			return err
-		}
-	}
-	if err := checkoutBranch(ws, boilerplateBranchName); err != nil {
-		return err
-	}
-	readmePath := filepath.Join(ws, "README.rst")
-	oldReadmeData, err := ioutil.ReadFile(readmePath)
-	if err != nil {
-		return err
-	}
-	readmeData := []byte(editBoilerplate(string(oldReadmeData), version, archHash))
-	if !bytes.Equal(readmeData, oldReadmeData) {
-		if err := ioutil.WriteFile(readmePath, readmeData, 0666); err != nil {
-			return err
-		}
-		message := fmt.Sprintf("update boilerplate for %s [skip ci]", version)
-		if err := createCommit(ws, message); err != nil {
-			return err
-		}
-		if err := pushBranch(ws, boilerplateBranchName); err != nil {
-			return err
-		}
-		if pr == nil {
-			if _, err := createPR(ctx, ghClient, message, boilerplateBranchName, "master"); err != nil {
+		boilerplateBranchExists := branchExists(ws, boilerplateBranchName)
+		if !boilerplateBranchExists {
+			if err := createBranch(ws, boilerplateBranchName, "master"); err != nil {
 				return err
 			}
 		}
+		if err := checkoutBranch(ws, boilerplateBranchName); err != nil {
+			return err
+		}
+		readmePath := filepath.Join(ws, "README.rst")
+		oldReadmeData, err := ioutil.ReadFile(readmePath)
+		if err != nil {
+			return err
+		}
+		readmeData := []byte(editBoilerplate(string(oldReadmeData), version, archHash))
+		if !bytes.Equal(readmeData, oldReadmeData) {
+			if err := ioutil.WriteFile(readmePath, readmeData, 0666); err != nil {
+				return err
+			}
+			message := fmt.Sprintf("update boilerplate for %s [skip ci]", version)
+			if err := createCommit(ws, message); err != nil {
+				return err
+			}
+			if err := pushBranch(ws, boilerplateBranchName); err != nil {
+				return err
+			}
+			if pr == nil {
+				if _, err := createPR(ctx, ghClient, message, boilerplateBranchName, "master"); err != nil {
+					return err
+				}
+			}
+		}
+
+		boilerplateMsg = fmt.Sprintf("- Squash and merge boilerplate PR at %s\n", boilerplatePR.GetIssueURL())
 	}
 
 	testURL := fmt.Sprintf("https://buildkite.com/bazel/rules-go-golang/builds?branch=%s", releaseBranch)
 	releaseURL := release.GetHTMLURL()
-	boilerplatePRURL := pr.GetHTMLURL()
 	log.Printf(`release is ready to go, but there are several manual steps:
 - Verify CI passes at %s
 - Edit and publish release notes at %s
-- Squash and merge boilerplate PR at %s
-
+%s
 TODO:
 - Update boilerplate in Gazelle`,
-		testURL, releaseURL, boilerplatePRURL)
+		testURL, releaseURL, boilerplateMsg)
 
 	return nil
 }
@@ -453,36 +469,13 @@ func editBoilerplate(text, version, archHash string) string {
 // GitHub operations
 // -----------------
 
-func updateRelease(ctx context.Context, ghClient *github.Client, version, branchName, archPath, archHash string) (release *github.RepositoryRelease, err error) {
+func updateRelease(ctx context.Context, ghClient *github.Client, release *github.RepositoryRelease, version, branchName, archPath, archHash string) (updatedRelease *github.RepositoryRelease, err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("could not update relase: %w", err)
 		}
 	}()
-
-	// Try to find an existing release.
 	tag := "v" + version
-	opts := &github.ListOptions{}
-ListOuter:
-	for {
-		releases, resp, err := ghClient.Repositories.ListReleases(ctx, "bazelbuild", "rules_go", opts)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range releases {
-			if r.GetName() == tag {
-				release = r
-				break ListOuter
-			}
-		}
-		if opts.Page+1 > resp.LastPage {
-			break
-		}
-		opts.Page = resp.NextPage
-	}
-	if release != nil && !release.GetDraft() {
-		return nil, fmt.Errorf("already published")
-	}
 
 	// Create or edit the release.
 	const boilerplateSkel = `## WORKSPACE code
@@ -552,6 +545,34 @@ ListOuter:
 	}
 
 	return release, nil
+}
+
+type releaseNotFoundError struct {
+	version string
+}
+
+func (e *releaseNotFoundError) Error() string {
+	return fmt.Sprintf("release %s not found", e.version)
+}
+
+func findRelease(ctx context.Context, ghClient *github.Client, version string) (release *github.RepositoryRelease, err error) {
+	tag := "v" + version
+	opts := &github.ListOptions{}
+	for {
+		releases, resp, err := ghClient.Repositories.ListReleases(ctx, "bazelbuild", "rules_go", opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range releases {
+			if r.GetName() == tag {
+				return r, nil
+			}
+		}
+		if opts.Page+1 > resp.LastPage {
+			return nil, &releaseNotFoundError{version: version}
+		}
+		opts.Page = resp.NextPage
+	}
 }
 
 type prNotFoundError struct {
