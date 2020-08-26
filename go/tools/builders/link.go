@@ -106,6 +106,7 @@ func link(args []string) error {
 
 	// generate any additional link options we need
 	goargs := goenv.goTool("link")
+	goargs = append(goargs, "-v")
 	goargs = append(goargs, "-importcfg", importcfgName)
 
 	parseXdef := func(xdef string) (pkg, name, value string, err error) {

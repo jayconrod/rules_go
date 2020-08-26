@@ -69,7 +69,7 @@ func envFlags(flags *flag.FlagSet) *env {
 	flags.StringVar(&env.sdk, "sdk", "", "Path to the Go SDK.")
 	flags.Var(&tagFlag{}, "tags", "List of build tags considered true.")
 	flags.StringVar(&env.installSuffix, "installsuffix", "", "Standard library under GOROOT/pkg")
-	flags.BoolVar(&env.verbose, "v", false, "Whether subprocess command lines should be printed")
+	flags.BoolVar(&env.verbose, "v", true, "Whether subprocess command lines should be printed")
 	flags.BoolVar(&env.shouldPreserveWorkDir, "work", false, "if true, the temporary work directory will be preserved")
 	return env
 }
