@@ -172,7 +172,7 @@ func runPrepare(ctx context.Context, stderr io.Writer, args []string) error {
 		return err
 	}
 	boilerplate := genBoilerplate(version, arcSum, goVersion)
-	rnotesStr := string(rnotesData) + "\n\n## `WORKSPACE` code\n\n```" + boilerplate + "\n```\n"
+	rnotesStr := string(rnotesData) + "\n\n## `WORKSPACE` code\n\n```\n" + boilerplate + "\n```\n"
 
 	// Push the release branch.
 	fmt.Fprintf(stderr, "pushing branch %s to origin...\n", branchName)
@@ -190,10 +190,10 @@ func runPrepare(ctx context.Context, stderr io.Writer, args []string) error {
 	}
 
 	// Create or update the GitHub release.
-	prerelease := true
-	draft := true
 	if release == nil {
 		fmt.Fprintf(stderr, "creating draft release...\n")
+		prerelease := true
+		draft := true
 		release = &github.RepositoryRelease{
 			TagName:         &version,
 			TargetCommitish: &branchName,
@@ -207,6 +207,7 @@ func runPrepare(ctx context.Context, stderr io.Writer, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(stderr, "updating release...\n")
+		release.Body = &rnotesStr
 		if release, _, err = gh.Repositories.EditRelease(ctx, "bazelbuild", "rules_go", release.GetID(), release); err != nil {
 			return err
 		}
